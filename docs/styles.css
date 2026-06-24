@@ -314,6 +314,140 @@ h2 {
   background-image: linear-gradient(90deg, rgba(12, 20, 27, 0.9), rgba(12, 20, 27, 0.48)), url("https://images.unsplash.com/photo-1606761568499-6d2451b23c66?auto=format&fit=crop&w=1800&q=80");
 }
 
+.scanner-header {
+  background-image: linear-gradient(90deg, rgba(12, 20, 27, 0.9), rgba(12, 20, 27, 0.46)), url("https://images.unsplash.com/photo-1613771404784-3a5686aa2be3?auto=format&fit=crop&w=1800&q=80");
+}
+
+.scanner-panel,
+.collection-panel {
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1.4rem;
+}
+
+.collection-panel {
+  margin-top: 2rem;
+}
+
+.camera-frame {
+  align-items: center;
+  aspect-ratio: 3 / 4;
+  background: #101820;
+  border-radius: 8px;
+  display: grid;
+  justify-items: center;
+  overflow: hidden;
+  width: 100%;
+}
+
+.camera-frame video,
+.camera-frame img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.scanner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.scanner-status {
+  color: var(--muted);
+  font-weight: 700;
+  margin: 1rem 0 0;
+}
+
+.lookup-form {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.lookup-form label {
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.price-settings {
+  border-top: 1px solid var(--line);
+  margin-top: 1.2rem;
+  padding-top: 1rem;
+}
+
+.price-settings summary {
+  color: var(--green);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.price-settings label {
+  color: var(--muted);
+  display: block;
+  font-weight: 900;
+  margin: 0.85rem 0 0.45rem;
+}
+
+.lookup-results {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.3rem;
+}
+
+.scanner-result,
+.saved-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 1rem;
+}
+
+.scanner-result {
+  grid-template-columns: 120px 1fr;
+  padding: 1rem;
+}
+
+.scanner-result img,
+.saved-card img {
+  width: 100%;
+}
+
+.scanner-result h3,
+.saved-card h3 {
+  font-size: 1.05rem;
+  font-weight: 900;
+  margin-bottom: 0.35rem;
+}
+
+.price-grid.compact {
+  margin-top: 0.7rem;
+  padding-top: 0.7rem;
+}
+
+.result-actions {
+  margin-top: 0.8rem;
+}
+
+.saved-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.saved-card {
+  grid-template-columns: 78px 1fr;
+  padding: 0.8rem;
+}
+
+.saved-card span {
+  color: var(--muted);
+  display: block;
+  font-weight: 700;
+  margin-top: 0.25rem;
+}
+
 .schedule-panel {
   overflow: hidden;
 }
@@ -417,5 +551,9 @@ footer {
 
   .card-image-wrap {
     min-height: 310px;
+  }
+
+  .scanner-result {
+    grid-template-columns: 92px 1fr;
   }
 }

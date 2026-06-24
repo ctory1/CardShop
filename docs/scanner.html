@@ -69,12 +69,6 @@
                 <datalist id="cardSetSuggestions"></datalist>
                 <button class="btn btn-primary" type="submit">Calculate Value</button>
               </form>
-              <details class="price-settings">
-                <summary>PriceCharting settings</summary>
-                <label for="priceChartingToken">API token</label>
-                <input class="form-control" id="priceChartingToken" name="priceChartingToken" type="password" autocomplete="off" placeholder="40-character PriceCharting token">
-                <p class="scanner-status">When a token is saved in this browser, the scanner averages PriceCharting ungraded with the other ungraded estimate.</p>
-              </details>
               <div class="lookup-results" id="lookupResults" aria-live="polite"></div>
             </div>
           </div>
@@ -96,12 +90,12 @@
     <footer>
       <div class="container d-flex flex-column flex-md-row justify-content-between gap-3">
         <span>&copy; 2026 J&amp;C PokePawns</span>
-        <span>Values average available ungraded sources when connected.</span>
+        <span>Values use available ungraded market data when connected.</span>
       </div>
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script src="script.js?v=scanner-cents-1"></script>
+    <script src="script.js?v=scanner-autofill-stable-1"></script>
   </body>
 </html>

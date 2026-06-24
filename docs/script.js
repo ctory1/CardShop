@@ -107,13 +107,13 @@ const lookupForm = document.querySelector("#cardLookup");
 const lookupResults = document.querySelector("#lookupResults");
 const savedCardsTarget = document.querySelector("#savedCards");
 const clearSavedCardsButton = document.querySelector("#clearSavedCards");
-const priceChartingTokenInput = document.querySelector("#priceChartingToken");
 const cardNameInput = document.querySelector("#cardName");
 const cardSetInput = document.querySelector("#cardSet");
 const cardNameSuggestions = document.querySelector("#cardNameSuggestions");
 const cardSetSuggestions = document.querySelector("#cardSetSuggestions");
 const savedCardsKey = "jc-pokepawns-scanned-cards";
-const priceChartingTokenKey = "jc-pokepawns-pricecharting-token";
+let cachedSetCards = [];
+let cachedSetCardsName = "";
 
 function setScannerStatus(message) {
   if (scannerStatus) {
@@ -296,9 +296,13 @@ async function updateCardSetSuggestions() {
     return;
   }
 
-  const results = await fetchCardSuggestions(`name:"${name}"`, 50);
+  if (name !== cachedSetCardsName) {
+    cachedSetCardsName = name;
+    cachedSetCards = await fetchCardSuggestions(`name:"${name}"`, 50);
+  }
+
   const filteredResults = setText.length >= 1
-    ? results.filter((card) => {
+    ? cachedSetCards.filter((card) => {
       const setName = card.set?.name || "";
       const number = card.number || "";
       const printedTotal = card.set?.printedTotal ? `${card.set.printedTotal}` : "";
@@ -306,7 +310,7 @@ async function updateCardSetSuggestions() {
       const haystack = `${setName} ${number} ${displayNumber}`.toLowerCase();
       return haystack.includes(setText.toLowerCase());
     })
-    : results;
+    : cachedSetCards;
   const options = uniqueBy(filteredResults, (card) => `${card.set?.name || ""}-${card.number}`).map((card) => {
     const setName = card.set?.name || "Unknown set";
     const printedTotal = card.set?.printedTotal ? `/${card.set.printedTotal}` : "";
@@ -317,46 +321,6 @@ async function updateCardSetSuggestions() {
     };
   });
   renderDatalist(cardSetSuggestions, options);
-}
-
-function priceChartingSearchQuery(card) {
-  const number = card.number ? ` #${card.number}` : "";
-  return `${card.name}${number} Pokemon Card`;
-}
-
-async function fetchPriceChartingUngraded(card) {
-  const token = localStorage.getItem(priceChartingTokenKey);
-  if (!token) {
-    return null;
-  }
-
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 9000);
-  const query = encodeURIComponent(priceChartingSearchQuery(card));
-
-  try {
-    const response = await fetch(`https://www.pricecharting.com/api/product?t=${encodeURIComponent(token)}&q=${query}`, {
-      signal: controller.signal
-    });
-    if (!response.ok) {
-      return null;
-    }
-
-    const body = await response.json();
-    if (body.status !== "success" || !body["loose-price"]) {
-      return null;
-    }
-
-    return {
-      label: "PriceCharting Ungraded",
-      value: body["loose-price"] / 100,
-      detail: body["product-name"] || "Matched product"
-    };
-  } catch (error) {
-    return null;
-  } finally {
-    window.clearTimeout(timeout);
-  }
 }
 
 function findLikelyCardName(text) {
@@ -411,7 +375,7 @@ async function identifyCapturedCard() {
 
 function sourceRows(sources) {
   if (!sources.length) {
-    return "<span>Ungraded sales data</span><strong>Unavailable</strong>";
+    return "<span>Ungraded sales data</span><strong>Not available yet</strong>";
   }
 
   return sources.map((source) => `
@@ -447,7 +411,7 @@ function resultCardTemplate(card, priceSources) {
         <p>${setName} ${number ? `#${number}` : ""}</p>
         <div class="price-grid compact">
           ${sourceRows(priceSources)}
-          <span>Average Value</span><strong>${hasPrice(market) ? money(market) : "No price"}</strong>
+          <span>Estimated Value</span><strong>${hasPrice(market) ? money(market) : "No price yet"}</strong>
           <span>80% Price</span><strong>${hasPrice(shopPrice) ? money(shopPrice) : "N/A"}</strong>
         </div>
         <div class="scanner-actions result-actions">
@@ -458,7 +422,7 @@ function resultCardTemplate(card, priceSources) {
   `;
 }
 
-async function pricedCard(card, includePriceCharting) {
+function pricedCard(card) {
   const pokemonTcgValue = automaticCardValue(card);
   const sources = [];
   if (pokemonTcgValue) {
@@ -467,13 +431,6 @@ async function pricedCard(card, includePriceCharting) {
       value: pokemonTcgValue,
       detail: "Card database price"
     });
-  }
-
-  if (includePriceCharting) {
-    const priceChartingValue = await fetchPriceChartingUngraded(card);
-    if (priceChartingValue) {
-      sources.push(priceChartingValue);
-    }
   }
 
   return { card, sources };
@@ -498,18 +455,12 @@ async function findCards(name, setText) {
       results = await fetchCards(buildFallbackCardQuery(name, setText));
     }
 
-    const pricedCards = [];
-    for (const [index, card] of results.entries()) {
-      pricedCards.push(await pricedCard(card, index === 0));
-    }
-    const tokenMessage = localStorage.getItem(priceChartingTokenKey)
-      ? ""
-      : "<p class=\"scanner-status\">Add a PriceCharting API token to include PriceCharting ungraded on the top match.</p>";
+    const pricedCards = results.map(pricedCard);
     const noPriceMessage = pricedCards.some((item) => !item.sources.length)
-      ? "<p class=\"scanner-status\">Some matched cards do not have ungraded sales data from the connected sources yet.</p>"
+      ? "<p class=\"scanner-status\">Some matched cards do not have ungraded sales data yet. This often happens when a card is very new or the market source has not posted sales/pricing data.</p>"
       : "";
     lookupResults.innerHTML = results.length
-      ? pricedCards.map((item) => resultCardTemplate(item.card, item.sources)).join("") + tokenMessage + noPriceMessage
+      ? pricedCards.map((item) => resultCardTemplate(item.card, item.sources)).join("") + noPriceMessage
       : "<p class=\"scanner-status\">No cards found. Try just the card name, or use the set name instead of the card number.</p>";
   } catch (error) {
     lookupResults.innerHTML = `<p class="scanner-status">${escapeHtml(error.message || "The card lookup is unavailable right now. Try again in a moment.")}</p>`;
@@ -602,27 +553,23 @@ if (lookupForm) {
 
 if (cardNameInput) {
   cardNameInput.addEventListener("input", debounce(() => {
+    cachedSetCardsName = "";
+    cachedSetCards = [];
     updateCardNameSuggestions();
     updateCardSetSuggestions();
   }, 300));
-  cardNameInput.addEventListener("change", updateCardSetSuggestions);
+  cardNameInput.addEventListener("change", () => {
+    cachedSetCardsName = "";
+    cachedSetCards = [];
+    updateCardSetSuggestions();
+  });
 }
 
 if (cardSetInput) {
   cardSetInput.addEventListener("input", debounce(updateCardSetSuggestions, 300));
-  cardSetInput.addEventListener("focus", updateCardSetSuggestions);
-}
-
-if (priceChartingTokenInput) {
-  priceChartingTokenInput.value = localStorage.getItem(priceChartingTokenKey) || "";
-  priceChartingTokenInput.addEventListener("change", () => {
-    const token = priceChartingTokenInput.value.trim();
-    if (token) {
-      localStorage.setItem(priceChartingTokenKey, token);
-      setScannerStatus("PriceCharting token saved in this browser.");
-    } else {
-      localStorage.removeItem(priceChartingTokenKey);
-      setScannerStatus("PriceCharting token removed.");
+  cardSetInput.addEventListener("focus", () => {
+    if (!cardSetSuggestions?.children.length) {
+      updateCardSetSuggestions();
     }
   });
 }

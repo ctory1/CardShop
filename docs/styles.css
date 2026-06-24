@@ -371,25 +371,6 @@ h2 {
   font-weight: 900;
 }
 
-.price-settings {
-  border-top: 1px solid var(--line);
-  margin-top: 1.2rem;
-  padding-top: 1rem;
-}
-
-.price-settings summary {
-  color: var(--green);
-  cursor: pointer;
-  font-weight: 900;
-}
-
-.price-settings label {
-  color: var(--muted);
-  display: block;
-  font-weight: 900;
-  margin: 0.85rem 0 0.45rem;
-}
-
 .lookup-results {
   display: grid;
   gap: 1rem;

@@ -44,7 +44,16 @@ const cards = [
 ];
 
 function money(value) {
-  return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  return value.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: value < 10 ? 2 : 0,
+    maximumFractionDigits: value < 10 ? 2 : 0
+  });
+}
+
+function hasPrice(value) {
+  return Number.isFinite(value) && value > 0;
 }
 
 function escapeHtml(value) {
@@ -402,7 +411,7 @@ async function identifyCapturedCard() {
 
 function sourceRows(sources) {
   if (!sources.length) {
-    return "<span>No source price</span><strong>N/A</strong>";
+    return "<span>Ungraded sales data</span><strong>Unavailable</strong>";
   }
 
   return sources.map((source) => `
@@ -412,7 +421,7 @@ function sourceRows(sources) {
 
 function resultCardTemplate(card, priceSources) {
   const market = average(priceSources.map((source) => source.value));
-  const shopPrice = market ? market * 0.8 : 0;
+  const shopPrice = hasPrice(market) ? market * 0.8 : 0;
   const image = card.images?.small || card.images?.large || "";
   const name = escapeHtml(card.name);
   const setName = escapeHtml(card.set?.name || "Unknown set");
@@ -438,8 +447,8 @@ function resultCardTemplate(card, priceSources) {
         <p>${setName} ${number ? `#${number}` : ""}</p>
         <div class="price-grid compact">
           ${sourceRows(priceSources)}
-          <span>Average Value</span><strong>${market ? money(market) : "No price"}</strong>
-          <span>80% Price</span><strong>${shopPrice ? money(shopPrice) : "N/A"}</strong>
+          <span>Average Value</span><strong>${hasPrice(market) ? money(market) : "No price"}</strong>
+          <span>80% Price</span><strong>${hasPrice(shopPrice) ? money(shopPrice) : "N/A"}</strong>
         </div>
         <div class="scanner-actions result-actions">
           <button class="btn btn-primary btn-sm save-scanned-card" type="button" data-card="${payload}">Enter Card</button>
@@ -496,8 +505,11 @@ async function findCards(name, setText) {
     const tokenMessage = localStorage.getItem(priceChartingTokenKey)
       ? ""
       : "<p class=\"scanner-status\">Add a PriceCharting API token to include PriceCharting ungraded on the top match.</p>";
+    const noPriceMessage = pricedCards.some((item) => !item.sources.length)
+      ? "<p class=\"scanner-status\">Some matched cards do not have ungraded sales data from the connected sources yet.</p>"
+      : "";
     lookupResults.innerHTML = results.length
-      ? pricedCards.map((item) => resultCardTemplate(item.card, item.sources)).join("") + tokenMessage
+      ? pricedCards.map((item) => resultCardTemplate(item.card, item.sources)).join("") + tokenMessage + noPriceMessage
       : "<p class=\"scanner-status\">No cards found. Try just the card name, or use the set name instead of the card number.</p>";
   } catch (error) {
     lookupResults.innerHTML = `<p class="scanner-status">${escapeHtml(error.message || "The card lookup is unavailable right now. Try again in a moment.")}</p>`;
@@ -558,8 +570,8 @@ function renderSavedCards() {
       <div>
         <h3>${escapeHtml(card.name)}</h3>
         <p>${escapeHtml(card.set)} ${card.number ? `#${escapeHtml(card.number)}` : ""}</p>
-        <strong>${card.market ? money(card.market) : "No price"}</strong>
-        <span>Shop price ${card.shopPrice ? money(card.shopPrice) : "N/A"}</span>
+        <strong>${hasPrice(card.market) ? money(card.market) : "No price"}</strong>
+        <span>Shop price ${hasPrice(card.shopPrice) ? money(card.shopPrice) : "N/A"}</span>
       </div>
     </article>
   `).join("");

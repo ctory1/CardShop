@@ -78,7 +78,7 @@ a:hover {
   background: var(--white);
   border: 2px solid transparent;
   border-radius: 8px;
-  color: var(--ink);
+  color: #bb935f;
   font-weight: 700;
   line-height: 1;
   min-height: 2.35rem;
@@ -87,31 +87,38 @@ a:hover {
   white-space: nowrap;
 }
 
+.nav-link:visited,
+.nav-link:focus {
+  color: #bb935f;
+}
+
 .nav-link.active,
 .nav-link:hover {
-  background: #fff8f4;
-  border-color: #f0c2bd;
-  box-shadow: 0 6px 20px rgba(216, 58, 53, 0.16);
-  color: var(--red);
+  background: #f3efe4;
+  border-color: #bfd4cb;
+  box-shadow: 0 6px 20px rgba(34, 118, 111, 0.14);
+  color: #8a6b45;
   transform: translateY(-2px);
 }
 
 .nav-link.active {
-  background: var(--red);
-  border-color: var(--red);
-  box-shadow: 0 8px 22px rgba(216, 58, 53, 0.26);
-  color: var(--white);
+  background: var(--green);
+  border-color: var(--green);
+  box-shadow: 0 8px 22px rgba(34, 118, 111, 0.24);
+  color: #f5ecd9 !important;
   font-weight: 900;
 }
 
-.nav-link.active:hover {
-  background: #c72f2b;
-  border-color: #c72f2b;
-  color: var(--white);
+.nav-link.active:hover,
+.nav-link.active:focus,
+.nav-link.active:visited {
+  background: #1b625c;
+  border-color: #1b625c;
+  color: #f5ecd9;
 }
 
 .nav-link:focus-visible {
-  outline: 3px solid rgba(216, 58, 53, 0.35);
+  outline: 3px solid rgba(34, 118, 111, 0.35);
   outline-offset: 2px;
 }
 

@@ -111,7 +111,12 @@ const cardNameInput = document.querySelector("#cardName");
 const cardSetInput = document.querySelector("#cardSet");
 const cardNameSuggestions = document.querySelector("#cardNameSuggestions");
 const cardSetSuggestions = document.querySelector("#cardSetSuggestions");
-const savedCardsKey = "jc-pokepawns-scanned-cards";
+const savedCardsBaseKey = "jc-pokepawns-scanned-cards";
+const accountsKey = "jc-pokepawns-accounts";
+const sessionKey = "jc-pokepawns-session";
+const apiTokenKey = "jc-pokepawns-api-token";
+const apiUserKey = "jc-pokepawns-api-user";
+const configuredApiBaseUrl = (window.CARDSHOP_API_BASE_URL || "").replace(/\/$/, "");
 let cachedSetCards = [];
 let cachedSetCardsName = "";
 
@@ -119,6 +124,499 @@ function setScannerStatus(message) {
   if (scannerStatus) {
     scannerStatus.textContent = message;
   }
+}
+
+function getAccounts() {
+  try {
+    return JSON.parse(localStorage.getItem(accountsKey)) || [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveAccounts(accounts) {
+  localStorage.setItem(accountsKey, JSON.stringify(accounts));
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}$/.test(email);
+}
+
+function setEmailValidity(input) {
+  if (!input) {
+    return;
+  }
+
+  input.setCustomValidity(isValidEmail(input.value.trim())
+    ? ""
+    : "Please enter a valid email address (needs to include a domain).");
+}
+
+function hasApiBackend() {
+  return Boolean(configuredApiBaseUrl);
+}
+
+async function apiRequest(path, options = {}) {
+  const token = localStorage.getItem(apiTokenKey);
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {})
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${configuredApiBaseUrl}${path}`, {
+    ...options,
+    headers
+  });
+
+  if (!response.ok) {
+    let message = response.status === 401 ? "Email or password is incorrect." : "Request failed.";
+    let duplicateFields = [];
+    try {
+      const body = await response.json();
+      message = body.message || message;
+      duplicateFields = Array.isArray(body.duplicateFields) ? body.duplicateFields : [];
+    } catch (error) {
+      // Keep the status-based message.
+    }
+    const requestError = new Error(message);
+    requestError.duplicateFields = duplicateFields;
+    throw requestError;
+  }
+
+  return response.status === 204 ? null : response.json();
+}
+
+function setApiSession(authResponse) {
+  localStorage.setItem(apiTokenKey, authResponse.token);
+  localStorage.setItem(apiUserKey, JSON.stringify(authResponse.user));
+}
+
+function clearApiSession() {
+  localStorage.removeItem(apiTokenKey);
+  localStorage.removeItem(apiUserKey);
+}
+
+function getActiveUser() {
+  if (hasApiBackend()) {
+    try {
+      return JSON.parse(localStorage.getItem(apiUserKey));
+    } catch (error) {
+      return null;
+    }
+  }
+
+  const userId = localStorage.getItem(sessionKey);
+  return getAccounts().find((account) => account.id === userId) || null;
+}
+
+function currentSavedCardsKey() {
+  const user = getActiveUser();
+  return user ? `${savedCardsBaseKey}-${user.id}` : `${savedCardsBaseKey}-guest`;
+}
+
+function formatTimestamp(dateValue) {
+  if (!dateValue) return "";
+  const date = new Date(dateValue);
+  if (isNaN(date.getTime())) return "";
+  let hours = date.getHours();
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  const seconds = date.getSeconds().toString().padStart(2, "0");
+  const amPm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+  return `${hours.toString().padStart(2, "0")}/${minutes}/${seconds} (${amPm})`;
+}
+
+function randomId() {
+  return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function bytesToHex(buffer) {
+  return Array.from(new Uint8Array(buffer))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function hashPassword(password, salt) {
+  const data = new TextEncoder().encode(`${salt}:${password}`);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return bytesToHex(hash);
+}
+
+function highlightCurrentNavLink() {
+  const currentPage = window.location.pathname.split("/").pop() || "index.html";
+  document.querySelectorAll(".navbar-nav .nav-link").forEach((link) => {
+    const linkPage = link.getAttribute("href")?.split("/").pop();
+    const isActive = linkPage === currentPage;
+    link.classList.toggle("active", isActive);
+    if (isActive) {
+      link.setAttribute("aria-current", "page");
+    } else {
+      link.removeAttribute("aria-current");
+    }
+  });
+}
+
+function injectAuthControls() {
+  const nav = document.querySelector(".navbar-nav");
+  if (!nav || document.querySelector("#authControls")) {
+    return;
+  }
+
+  nav.insertAdjacentHTML("beforeend", `
+    <li class="nav-item auth-nav-item">
+      <div class="auth-controls" id="authControls"></div>
+    </li>
+  `);
+
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="auth-modal" id="authModal" hidden>
+      <div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+        <button class="auth-close" id="authClose" type="button" aria-label="Close login">&times;</button>
+        <p class="eyebrow dark" id="authModeLabel">Account</p>
+        <h2 id="authTitle">Sign up or log in</h2>
+        <div class="auth-tabs">
+          <button class="auth-tab active" id="showSignup" type="button">Sign Up</button>
+          <button class="auth-tab" id="showLogin" type="button">Login</button>
+        </div>
+        <form class="auth-form" id="signupForm">
+          <label for="signupUsername">Username</label>
+          <input class="form-control" id="signupUsername" name="username" type="text" minlength="3" maxlength="12" autocomplete="username" required>
+          <label for="signupEmail">Email</label>
+          <input class="form-control" id="signupEmail" name="email" type="email" autocomplete="email" pattern="^[^\\s@]+@(?:[A-Za-z0-9-]+\\.)+[A-Za-z]{2,}$" title="Please enter a valid email address (needs to include a domain)." required>
+          <label for="signupPassword">Password</label>
+          <div class="password-field">
+            <input class="form-control" id="signupPassword" name="password" type="password" autocomplete="new-password" required>
+            <button class="password-toggle" type="button" data-password-toggle="signupPassword" aria-label="Show password" title="Show password">&#128065;</button>
+          </div>
+          <button class="btn btn-primary" type="submit">Create Account</button>
+        </form>
+        <form class="auth-form" id="loginForm" hidden>
+          <label for="loginEmail">Email</label>
+          <input class="form-control" id="loginEmail" name="email" type="email" autocomplete="email" pattern="^[^\\s@]+@(?:[A-Za-z0-9-]+\\.)+[A-Za-z]{2,}$" title="Please enter a valid email address (needs to include a domain)." required>
+          <label for="loginPassword">Password</label>
+          <div class="password-field">
+            <input class="form-control" id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+            <button class="password-toggle" type="button" data-password-toggle="loginPassword" aria-label="Show password" title="Show password">&#128065;</button>
+          </div>
+          <button class="btn btn-primary" type="submit">Login</button>
+        </form>
+        <p class="auth-message" id="authMessage">Accounts are saved in this browser for this static site.</p>
+      </div>
+    </div>
+  `);
+}
+
+function showAuthModal(mode = "signup") {
+  const modal = document.querySelector("#authModal");
+  if (!modal) {
+    return;
+  }
+
+  modal.hidden = false;
+  setAuthMode(mode);
+}
+
+function hideAuthModal() {
+  const modal = document.querySelector("#authModal");
+  if (modal) {
+    modal.hidden = true;
+  }
+}
+
+function setAuthMode(mode) {
+  const isSignup = mode === "signup";
+  document.querySelector("#signupForm").hidden = !isSignup;
+  document.querySelector("#loginForm").hidden = isSignup;
+  document.querySelector("#showSignup").classList.toggle("active", isSignup);
+  document.querySelector("#showLogin").classList.toggle("active", !isSignup);
+  document.querySelector("#authTitle").textContent = isSignup ? "Create your account" : "Welcome back";
+  document.querySelector("#authModeLabel").textContent = isSignup ? "Sign Up" : "Login";
+  document.querySelector("#authMessage").textContent = hasApiBackend() ? "Accounts are saved to the CardShop server." : "Accounts are saved in this browser for this static site.";
+}
+
+function setAuthMessage(message) {
+  const authMessage = document.querySelector("#authMessage");
+  if (authMessage) {
+    authMessage.textContent = message;
+  }
+}
+
+function clearDuplicateSignupFields() {
+  document.querySelectorAll("#signupForm .form-control.is-duplicate").forEach((el) => el.classList.remove("is-duplicate"));
+  document.querySelectorAll("#signupForm .is-duplicate-label").forEach((el) => el.classList.remove("is-duplicate-label"));
+}
+
+function markDuplicateSignupField(fieldName) {
+  const fieldId = fieldName === "username" ? "signupUsername" : "signupEmail";
+  const input = document.querySelector(`#${fieldId}`);
+  const label = document.querySelector(`label[for="${fieldId}"]`);
+  input?.classList.add("is-duplicate");
+  label?.classList.add("is-duplicate-label");
+}
+
+function duplicateSignupMessage(duplicateFields) {
+  const issues = [];
+  if (duplicateFields.includes("username")) issues.push("Username is taken");
+  if (duplicateFields.includes("email")) issues.push("Email is taken");
+  return `${issues.join(" and ")}.`;
+}
+
+function clearLoginEmailError() {
+  document.querySelector("#loginEmail")?.classList.remove("is-duplicate");
+  document.querySelector("label[for=\"loginEmail\"]")?.classList.remove("is-duplicate-label");
+}
+
+function markLoginEmailError() {
+  document.querySelector("#loginEmail")?.classList.add("is-duplicate");
+  document.querySelector("label[for=\"loginEmail\"]")?.classList.add("is-duplicate-label");
+}
+
+function clearLoginPasswordError() {
+  document.querySelector("#loginPassword")?.classList.remove("is-duplicate");
+  document.querySelector("label[for=\"loginPassword\"]")?.classList.remove("is-duplicate-label");
+}
+
+function markLoginPasswordError() {
+  document.querySelector("#loginPassword")?.classList.add("is-duplicate");
+  document.querySelector("label[for=\"loginPassword\"]")?.classList.add("is-duplicate-label");
+}
+
+function clearLoginErrors() {
+  clearLoginEmailError();
+  clearLoginPasswordError();
+}
+
+function togglePasswordVisibility(button) {
+  const input = document.querySelector(`#${button.dataset.passwordToggle}`);
+  if (!input) {
+    return;
+  }
+
+  const isHidden = input.type === "password";
+  input.type = isHidden ? "text" : "password";
+  button.classList.toggle("is-visible", isHidden);
+  button.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
+  button.title = isHidden ? "Hide password" : "Show password";
+}
+
+function renderAuthControls() {
+  const authControls = document.querySelector("#authControls");
+  if (!authControls) {
+    return;
+  }
+
+  const user = getActiveUser();
+  authControls.innerHTML = user
+    ? `<span class="auth-greeting">Hi, ${escapeHtml(user.username)}</span><button class="auth-link" id="logoutButton" type="button">Logout</button>`
+    : `<button class="auth-link" id="openLogin" type="button">Login</button><button class="btn btn-primary btn-sm" id="openSignup" type="button">Sign Up</button>`;
+}
+
+async function createAccount(event) {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const username = form.get("username").trim();
+  if (username.length > 12) {
+    setAuthMessage("Username must be 12 characters or fewer.");
+    return;
+  }
+  const email = form.get("email").trim().toLowerCase();
+  const password = form.get("password");
+
+  if (!isValidEmail(email)) {
+    markDuplicateSignupField("email");
+    setAuthMessage("Email must include a domain, like name@example.com.");
+    return;
+  }
+
+  if (hasApiBackend()) {
+    try {
+      const authResponse = await apiRequest("/api/auth/signup", {
+        method: "POST",
+        body: JSON.stringify({ username, email, password })
+      });
+      setApiSession(authResponse);
+      event.target.reset();
+      hideAuthModal();
+      renderAuthControls();
+      await renderSavedCards();
+    } catch (error) {
+      clearDuplicateSignupFields();
+
+      const duplicateFields = error.duplicateFields || [];
+      duplicateFields.forEach(markDuplicateSignupField);
+      setAuthMessage(duplicateFields.length ? duplicateSignupMessage(duplicateFields) : error.message);
+    }
+    return;
+  }
+
+  clearDuplicateSignupFields();
+
+  const accounts = getAccounts();
+
+  // Check both email and username for duplicates simultaneously so the user
+  // sees all issues at once rather than fixing one field at a time.
+  const duplicateEmail = accounts.some((account) => account.email === email);
+  const duplicateUsername = accounts.some((account) => account.username.toLowerCase() === username.toLowerCase());
+
+  if (duplicateEmail || duplicateUsername) {
+    const duplicateFields = [];
+    if (duplicateUsername) duplicateFields.push("username");
+    if (duplicateEmail) duplicateFields.push("email");
+    duplicateFields.forEach(markDuplicateSignupField);
+    setAuthMessage(duplicateSignupMessage(duplicateFields));
+    return;
+  }
+
+  const salt = randomId();
+  const account = {
+    id: randomId(),
+    username,
+    email,
+    salt,
+    passwordHash: await hashPassword(password, salt),
+    createdAt: new Date().toISOString()
+  };
+
+  saveAccounts([...accounts, account]);
+  localStorage.setItem(sessionKey, account.id);
+  event.target.reset();
+  hideAuthModal();
+  renderAuthControls();
+  renderSavedCards();
+}
+
+async function loginAccount(event) {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const email = form.get("email").trim().toLowerCase();
+  const password = form.get("password");
+  clearLoginErrors();
+
+  if (hasApiBackend()) {
+    try {
+      const authResponse = await apiRequest("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password })
+      });
+      setApiSession(authResponse);
+      event.target.reset();
+      hideAuthModal();
+      renderAuthControls();
+      await renderSavedCards();
+    } catch (error) {
+      if (error.message === "Email not registered.") {
+        markLoginEmailError();
+      } else if (error.message === "Password is incorrect.") {
+        markLoginPasswordError();
+      }
+      setAuthMessage(error.message);
+    }
+    return;
+  }
+
+  const account = getAccounts().find((candidate) => candidate.email === email);
+
+  if (!account) {
+    markLoginEmailError();
+    setAuthMessage("Email not registered.");
+    return;
+  }
+
+  if (account.passwordHash !== await hashPassword(password, account.salt)) {
+    markLoginPasswordError();
+    setAuthMessage("Password is incorrect.");
+    return;
+  }
+
+  localStorage.setItem(sessionKey, account.id);
+  event.target.reset();
+  hideAuthModal();
+  renderAuthControls();
+  renderSavedCards();
+}
+
+function initializeAuth() {
+  injectAuthControls();
+  highlightCurrentNavLink();
+  renderAuthControls();
+
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("#openSignup")) {
+      showAuthModal("signup");
+    }
+    if (event.target.closest("#openLogin")) {
+      showAuthModal("login");
+    }
+    if (event.target.closest("#logoutButton")) {
+      if (hasApiBackend()) {
+        apiRequest("/api/auth/logout", { method: "POST" }).catch(() => {});
+        clearApiSession();
+      } else {
+        localStorage.removeItem(sessionKey);
+      }
+      renderAuthControls();
+      renderSavedCards();
+    }
+    if (event.target.closest("#authClose")) {
+      hideAuthModal();
+    }
+    if (event.target.closest("#showSignup")) {
+      setAuthMode("signup");
+    }
+    if (event.target.closest("#showLogin")) {
+      setAuthMode("login");
+    }
+    const passwordToggle = event.target.closest("[data-password-toggle]");
+    if (passwordToggle) {
+      togglePasswordVisibility(passwordToggle);
+    }
+  });
+
+  const signupPasswordInput = document.querySelector("#signupPassword");
+  if (signupPasswordInput) {
+    signupPasswordInput.addEventListener("input", function () {
+      const len = this.value.length;
+      if (len > 0 && len <= 6) {
+        this.setCustomValidity(`Please enter a password greater than 6 characters (you are currently using ${len} character${len === 1 ? "" : "s"})`);
+      } else {
+        this.setCustomValidity("");
+      }
+    });
+  }
+
+  // Clear duplicate field highlighting when user types in those fields
+  document.querySelectorAll("#signupUsername, #signupEmail").forEach((input) => {
+    input.addEventListener("input", function () {
+      this.classList.remove("is-duplicate");
+      const label = this.id === "signupUsername"
+        ? document.querySelector("label[for=\"signupUsername\"]")
+        : document.querySelector("label[for=\"signupEmail\"]");
+      if (label) label.classList.remove("is-duplicate-label");
+    });
+  });
+
+  document.querySelectorAll("#signupEmail, #loginEmail").forEach((input) => {
+    input.addEventListener("input", function () {
+      if (this.value.trim()) {
+        setEmailValidity(this);
+      } else {
+        this.setCustomValidity("");
+      }
+    });
+    input.addEventListener("invalid", function () {
+      setEmailValidity(this);
+    });
+  });
+
+  document.querySelector("#loginEmail")?.addEventListener("input", clearLoginEmailError);
+  document.querySelector("#loginPassword")?.addEventListener("input", clearLoginPasswordError);
+
+  document.querySelector("#signupForm")?.addEventListener("submit", createAccount);
+  document.querySelector("#loginForm")?.addEventListener("submit", loginAccount);
 }
 
 async function startScannerCamera() {
@@ -157,18 +655,50 @@ async function captureScannerImage() {
   await identifyCapturedCard();
 }
 
-function getSavedCards() {
+async function getSavedCards() {
+  if (hasApiBackend()) {
+    return await apiRequest("/api/cards");
+  }
+
   try {
-    return JSON.parse(localStorage.getItem(savedCardsKey)) || [];
+    return JSON.parse(localStorage.getItem(currentSavedCardsKey())) || [];
   } catch (error) {
     return [];
   }
 }
 
-function saveCard(card) {
-  const savedCards = getSavedCards();
+async function saveCard(card) {
+  const user = getActiveUser();
+  if (!user) {
+    showAuthModal("signup");
+    setAuthMessage("Create an account or log in before entering scanned cards.");
+    return;
+  }
+
+  if (hasApiBackend()) {
+    try {
+      await apiRequest("/api/cards", {
+        method: "POST",
+        body: JSON.stringify({
+          cardApiId: card.id,
+          cardName: card.name,
+          cardSet: card.set,
+          cardNumber: card.number,
+          imageUrl: card.image,
+          marketPrice: hasPrice(card.market) ? card.market : null,
+          shopPrice: hasPrice(card.shopPrice) ? card.shopPrice : null
+        })
+      });
+      await renderSavedCards();
+    } catch (error) {
+      setScannerStatus(error.message || "Could not save this card.");
+    }
+    return;
+  }
+
+  const savedCards = await getSavedCards();
   const withoutDuplicate = savedCards.filter((savedCard) => savedCard.id !== card.id);
-  localStorage.setItem(savedCardsKey, JSON.stringify([card, ...withoutDuplicate].slice(0, 24)));
+  localStorage.setItem(currentSavedCardsKey(), JSON.stringify([card, ...withoutDuplicate].slice(0, 24)));
   renderSavedCards();
 }
 
@@ -504,28 +1034,45 @@ async function lookUpCard(event) {
   await findCards(name, setText);
 }
 
-function renderSavedCards() {
+async function renderSavedCards() {
   if (!savedCardsTarget) {
     return;
   }
 
-  const savedCards = getSavedCards();
-  if (!savedCards.length) {
-    savedCardsTarget.innerHTML = "<p class=\"scanner-status\">No entered cards yet.</p>";
+  const user = getActiveUser();
+  if (!user) {
+    savedCardsTarget.innerHTML = "<p class=\"scanner-status\">Sign up or log in to save scanned cards to your account.</p>";
     return;
   }
 
-  savedCardsTarget.innerHTML = savedCards.map((card) => `
+  let savedCards = [];
+  try {
+    savedCards = await getSavedCards();
+  } catch (error) {
+    savedCardsTarget.innerHTML = "<p class=\"scanner-status\">Could not load saved cards from the server.</p>";
+    return;
+  }
+
+  if (!savedCards.length) {
+    savedCardsTarget.innerHTML = `<p class="scanner-status">No entered cards yet for ${escapeHtml(user.username)}.</p>`;
+    return;
+  }
+
+  savedCardsTarget.innerHTML = savedCards.map((card) => {
+    const timestamp = formatTimestamp(card.createdAt || card.CreatedAt);
+    const timestampHtml = timestamp ? `<span class="card-timestamp">Entered ${timestamp}</span>` : "";
+    return `
     <article class="saved-card">
-      <img src="${escapeHtml(card.image)}" alt="${escapeHtml(card.name)} card">
+      <img src="${escapeHtml(card.image || card.imageUrl || "")}" alt="${escapeHtml(card.name || card.cardName)} card">
       <div>
-        <h3>${escapeHtml(card.name)}</h3>
-        <p>${escapeHtml(card.set)} ${card.number ? `#${escapeHtml(card.number)}` : ""}</p>
-        <strong>${hasPrice(card.market) ? money(card.market) : "No price"}</strong>
+        <h3>${escapeHtml(card.name || card.cardName)}</h3>
+        <p>${escapeHtml(card.set || card.cardSet || "")} ${card.number || card.cardNumber ? `#${escapeHtml(card.number || card.cardNumber)}` : ""}</p>
+        <strong>${hasPrice(card.market || card.marketPrice) ? money(card.market || card.marketPrice) : "No price"}</strong>
         <span>Shop price ${hasPrice(card.shopPrice) ? money(card.shopPrice) : "N/A"}</span>
+        ${timestampHtml}
       </div>
-    </article>
-  `).join("");
+    </article>`;
+  }).join("");
 }
 
 if (startCameraButton) {
@@ -575,10 +1122,16 @@ if (cardSetInput) {
 }
 
 if (clearSavedCardsButton) {
-  clearSavedCardsButton.addEventListener("click", () => {
-    localStorage.removeItem(savedCardsKey);
-    renderSavedCards();
+  clearSavedCardsButton.addEventListener("click", async () => {
+    if (hasApiBackend()) {
+      savedCardsTarget.innerHTML = "<p class=\"scanner-status\">Bulk clear is local-only for now. Server cards can be deleted one at a time after we add delete buttons.</p>";
+      return;
+    }
+
+    localStorage.removeItem(currentSavedCardsKey());
+    await renderSavedCards();
   });
 }
 
+initializeAuth();
 renderSavedCards();

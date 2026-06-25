@@ -99,6 +99,7 @@ if (featuredTarget) {
 
 const scannerVideo = document.querySelector("#camera");
 const startCameraButton = document.querySelector("#startCamera");
+const stopCameraButton = document.querySelector("#stopCamera");
 const captureButton = document.querySelector("#capture");
 const snapshotCanvas = document.querySelector("#snapshot");
 const snapshotPreview = document.querySelector("#snapshotPreview");
@@ -308,6 +309,18 @@ function injectAuthControls() {
       </div>
     </div>
   `);
+
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="auth-modal" id="signupThanksModal" hidden>
+      <div class="auth-dialog signup-thanks-dialog" role="dialog" aria-modal="true" aria-labelledby="signupThanksTitle">
+        <button class="auth-close" id="signupThanksClose" type="button" aria-label="Close signup thank you">&times;</button>
+        <p class="eyebrow dark">Account Created</p>
+        <h2 id="signupThanksTitle">Welcome to J&amp;C Pok&eacute;Pawns!</h2>
+        <p class="signup-thanks-message" id="signupThanksMessage"></p>
+        <a class="btn btn-primary" href="loyaltyprogram.html">View Loyalty Program</a>
+      </div>
+    </div>
+  `);
 }
 
 function showAuthModal(mode = "signup") {
@@ -322,6 +335,24 @@ function showAuthModal(mode = "signup") {
 
 function hideAuthModal() {
   const modal = document.querySelector("#authModal");
+  if (modal) {
+    modal.hidden = true;
+  }
+}
+
+function showSignupThanks(username) {
+  const modal = document.querySelector("#signupThanksModal");
+  const message = document.querySelector("#signupThanksMessage");
+  if (!modal || !message) {
+    return;
+  }
+
+  message.innerHTML = `Thank you, <span class="signup-thanks-name">${escapeHtml(username)}</span> for signing up! If you have any questions about how our loyalty program works, click the button below!`;
+  modal.hidden = false;
+}
+
+function hideSignupThanks() {
+  const modal = document.querySelector("#signupThanksModal");
   if (modal) {
     modal.hidden = true;
   }
@@ -442,6 +473,7 @@ async function createAccount(event) {
       event.target.reset();
       hideAuthModal();
       renderAuthControls();
+      showSignupThanks(authResponse.user.username);
       await renderSavedCards();
     } catch (error) {
       clearDuplicateSignupFields();
@@ -486,6 +518,7 @@ async function createAccount(event) {
   event.target.reset();
   hideAuthModal();
   renderAuthControls();
+  showSignupThanks(account.username);
   renderSavedCards();
 }
 
@@ -564,6 +597,9 @@ function initializeAuth() {
     if (event.target.closest("#authClose")) {
       hideAuthModal();
     }
+    if (event.target.closest("#signupThanksClose")) {
+      hideSignupThanks();
+    }
     if (event.target.closest("#showSignup")) {
       setAuthMode("signup");
     }
@@ -626,15 +662,55 @@ async function startScannerCamera() {
   }
 
   try {
+    stopScannerCamera(false, true);
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: "environment" } },
       audio: false
     });
     scannerVideo.srcObject = stream;
+    scannerVideo.hidden = false;
+    snapshotPreview.hidden = true;
+    startCameraButton.disabled = true;
     captureButton.disabled = false;
+    stopCameraButton.disabled = false;
     setScannerStatus("Camera ready. Put the card in frame and capture it.");
   } catch (error) {
     setScannerStatus("Camera blocked or unavailable. You can still type the card name and check value.");
+  }
+}
+
+function stopScannerCamera(updateStatus = true, clearPreview = false) {
+  if (!scannerVideo) {
+    return;
+  }
+
+  const stream = scannerVideo.srcObject;
+  if (stream) {
+    stream.getTracks().forEach((track) => track.stop());
+    scannerVideo.srcObject = null;
+  }
+
+  const hasPreview = snapshotPreview && !snapshotPreview.hidden;
+  scannerVideo.hidden = hasPreview && !clearPreview;
+  if (snapshotPreview) {
+    if (clearPreview) {
+      snapshotPreview.hidden = true;
+      snapshotPreview.removeAttribute("src");
+    }
+  }
+
+  if (startCameraButton) {
+    startCameraButton.disabled = false;
+  }
+  if (captureButton) {
+    captureButton.disabled = true;
+  }
+  if (stopCameraButton) {
+    stopCameraButton.disabled = true;
+  }
+
+  if (updateStatus) {
+    setScannerStatus("Camera stopped. Start it again when you are ready to scan.");
   }
 }
 
@@ -1077,6 +1153,12 @@ async function renderSavedCards() {
 
 if (startCameraButton) {
   startCameraButton.addEventListener("click", startScannerCamera);
+}
+
+if (stopCameraButton) {
+  stopCameraButton.addEventListener("click", () => {
+    stopScannerCamera();
+  });
 }
 
 if (captureButton) {

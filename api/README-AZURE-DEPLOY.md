@@ -111,7 +111,7 @@ Wait a few minutes for the App Service to deploy.
    - **Type:** `SQLAzure`
    - Click **Apply**, then **Save** at the top.
 
-### 4c. Add Your GitHub Pages URL to CORS
+### 4c. Add Your GitHub Pages URL to CORS (Currently here)
 
 While still in **Environment variables**, under **App settings**, add:
 

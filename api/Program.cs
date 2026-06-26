@@ -4,6 +4,8 @@ using System.Text.RegularExpressions;
 using CardShop.Api;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.SqlClient;
+using System.Net;
+using System.Net.Mail;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -33,6 +35,7 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddSingleton<PasswordHasher<AppUser>>();
 builder.Services.AddSingleton<Database>();
+builder.Services.AddSingleton<EmailSender>();
 builder.Services.AddHttpContextAccessor();
 
 var app = builder.Build();
@@ -123,6 +126,97 @@ app.MapPost("/api/auth/login", async (
     return Results.Ok(AuthResponse.FromUser(user, token));
 });
 
+app.MapPost("/api/auth/request-password-reset", async (
+    PasswordResetRequest request,
+    HttpRequest httpRequest,
+    Database db,
+    EmailSender emailSender) =>
+{
+    if (!IsValidEmail(request.Email))
+    {
+        return Results.BadRequest(new { message = "Enter a valid email address." });
+    }
+
+    if (!emailSender.IsConfigured)
+    {
+        return Results.Json(
+            new { message = "Password reset email is not configured on the server." },
+            statusCode: StatusCodes.Status500InternalServerError);
+    }
+
+    var email = request.Email.Trim().ToLowerInvariant();
+    var user = await db.GetUserByEmailAsync(email);
+    if (user is null)
+    {
+        return Results.NotFound(new { message = "Email not registered." });
+    }
+
+    var resetToken = CreateToken();
+    try
+    {
+        await db.CreatePasswordResetTokenAsync(user.Id, HashToken(resetToken));
+    }
+    catch (SqlException)
+    {
+        return Results.Json(
+            new { message = "Password reset storage is not ready. Run api/sql/003-password-reset-tokens.sql, then try again." },
+            statusCode: StatusCodes.Status500InternalServerError);
+    }
+
+    var resetUrlBase = !string.IsNullOrWhiteSpace(request.ResetUrlBase)
+        ? request.ResetUrlBase.Trim()
+        : $"{httpRequest.Scheme}://{httpRequest.Host}/";
+    var resetUrl = $"{resetUrlBase}{(resetUrlBase.Contains('?') ? "&" : "?")}resetToken={Uri.EscapeDataString(resetToken)}&email={Uri.EscapeDataString(email)}";
+
+    try
+    {
+        await emailSender.SendPasswordResetAsync(email, user.Username, resetUrl);
+    }
+    catch (Exception)
+    {
+        return Results.Json(
+            new { message = "Password reset email could not be sent right now." },
+            statusCode: StatusCodes.Status500InternalServerError);
+    }
+
+    return Results.Ok(new { message = "Password reset email sent." });
+});
+
+app.MapPost("/api/auth/reset-password", async (
+    PasswordResetConfirmRequest request,
+    Database db,
+    PasswordHasher<AppUser> passwordHasher) =>
+{
+    if (!IsValidEmail(request.Email))
+    {
+        return Results.BadRequest(new { message = "Enter a valid email address." });
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Token))
+    {
+        return Results.BadRequest(new { message = "Reset token is required." });
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 8)
+    {
+        return Results.BadRequest(new { message = "Password must be at least 8 characters." });
+    }
+
+    var email = request.Email.Trim().ToLowerInvariant();
+    var user = await db.GetUserByValidPasswordResetTokenAsync(email, HashToken(request.Token));
+    if (user is null)
+    {
+        return Results.BadRequest(new { message = "This reset link is invalid or expired." });
+    }
+
+    user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
+    await db.UpdatePasswordAsync(user.Id, user.PasswordHash);
+    await db.MarkPasswordResetTokenUsedAsync(HashToken(request.Token));
+    await db.DeleteSessionsForUserAsync(user.Id);
+
+    return Results.Ok(new { message = "Password updated. You can log in now." });
+});
+
 app.MapPost("/api/auth/logout", async (HttpRequest request, Database db) =>
 {
     var token = GetBearerToken(request);
@@ -168,6 +262,20 @@ app.MapPost("/api/cards", async (HttpRequest request, SaveCardRequest card, Data
 
     var savedCard = await db.SaveCardAsync(user.Id, card);
     return Results.Ok(savedCard);
+});
+
+app.MapPut("/api/cards/{id:int}/price", async (HttpRequest request, int id, UpdateCardPriceRequest price, Database db) =>
+{
+    var user = await GetAuthenticatedUser(request, db);
+    if (user is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var savedCard = await db.UpdateCardPriceAsync(user.Id, id, price);
+    return savedCard is null
+        ? Results.NotFound(new { message = "Saved card not found." })
+        : Results.Ok(savedCard);
 });
 
 app.MapDelete("/api/cards/{id:int}", async (HttpRequest request, int id, Database db) =>
@@ -251,6 +359,8 @@ namespace CardShop.Api
 
     public sealed record SignupRequest(string Username, string Email, string Password);
     public sealed record LoginRequest(string Email, string Password);
+    public sealed record PasswordResetRequest(string Email, string? ResetUrlBase);
+    public sealed record PasswordResetConfirmRequest(string Email, string Token, string Password);
     public sealed record UserDto(int Id, string Username, string Email)
     {
         public static UserDto FromUser(AppUser user) => new(user.Id, user.Username, user.Email);
@@ -269,6 +379,8 @@ namespace CardShop.Api
         string? ImageUrl,
         decimal? MarketPrice,
         decimal? ShopPrice);
+
+    public sealed record UpdateCardPriceRequest(decimal? MarketPrice, decimal? ShopPrice);
 
     public sealed record SavedCardResponse(
         int Id,
@@ -379,6 +491,15 @@ namespace CardShop.Api
             await command.ExecuteNonQueryAsync();
         }
 
+        public async Task DeleteSessionsForUserAsync(int userId)
+        {
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync();
+            await using var command = new SqlCommand("DELETE FROM UserSessions WHERE UserId = @UserId;", connection);
+            command.Parameters.AddWithValue("@UserId", userId);
+            await command.ExecuteNonQueryAsync();
+        }
+
         public async Task<AppUser?> GetUserBySessionAsync(string tokenHash)
         {
             await using var connection = new SqlConnection(_connectionString);
@@ -394,6 +515,70 @@ namespace CardShop.Api
             command.Parameters.AddWithValue("@TokenHash", tokenHash);
             await using var reader = await command.ExecuteReaderAsync();
             return await reader.ReadAsync() ? ReadUser(reader) : null;
+        }
+
+        public async Task CreatePasswordResetTokenAsync(int userId, string tokenHash)
+        {
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync();
+            await using var command = new SqlCommand("""
+                DELETE FROM PasswordResetTokens
+                WHERE UserId = @UserId AND (UsedAt IS NULL OR ExpiresAt <= SYSUTCDATETIME());
+
+                INSERT INTO PasswordResetTokens (UserId, TokenHash, ExpiresAt)
+                VALUES (@UserId, @TokenHash, DATEADD(hour, 1, SYSUTCDATETIME()));
+                """, connection);
+            command.Parameters.AddWithValue("@UserId", userId);
+            command.Parameters.AddWithValue("@TokenHash", tokenHash);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        public async Task<AppUser?> GetUserByValidPasswordResetTokenAsync(string email, string tokenHash)
+        {
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync();
+            await using var command = new SqlCommand("""
+                DELETE FROM PasswordResetTokens WHERE ExpiresAt <= SYSUTCDATETIME();
+
+                SELECT TOP 1 u.Id, u.Username, u.Email, u.PasswordHash
+                FROM PasswordResetTokens t
+                JOIN Users u ON u.Id = t.UserId
+                WHERE LOWER(u.Email) = LOWER(@Email)
+                  AND t.TokenHash = @TokenHash
+                  AND t.UsedAt IS NULL
+                  AND t.ExpiresAt > SYSUTCDATETIME();
+                """, connection);
+            command.Parameters.AddWithValue("@Email", email);
+            command.Parameters.AddWithValue("@TokenHash", tokenHash);
+            await using var reader = await command.ExecuteReaderAsync();
+            return await reader.ReadAsync() ? ReadUser(reader) : null;
+        }
+
+        public async Task MarkPasswordResetTokenUsedAsync(string tokenHash)
+        {
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync();
+            await using var command = new SqlCommand("""
+                UPDATE PasswordResetTokens
+                SET UsedAt = SYSUTCDATETIME()
+                WHERE TokenHash = @TokenHash;
+                """, connection);
+            command.Parameters.AddWithValue("@TokenHash", tokenHash);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        public async Task UpdatePasswordAsync(int userId, string passwordHash)
+        {
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync();
+            await using var command = new SqlCommand("""
+                UPDATE Users
+                SET PasswordHash = @PasswordHash
+                WHERE Id = @UserId;
+                """, connection);
+            command.Parameters.AddWithValue("@UserId", userId);
+            command.Parameters.AddWithValue("@PasswordHash", passwordHash);
+            await command.ExecuteNonQueryAsync();
         }
 
         public async Task<IReadOnlyList<SavedCardResponse>> GetCardsAsync(int userId)
@@ -442,6 +627,26 @@ namespace CardShop.Api
             return ReadCard(reader);
         }
 
+        public async Task<SavedCardResponse?> UpdateCardPriceAsync(int userId, int id, UpdateCardPriceRequest price)
+        {
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync();
+            await using var command = new SqlCommand("""
+                UPDATE ScannedCards
+                SET MarketPrice = @MarketPrice,
+                    ShopPrice = @ShopPrice
+                OUTPUT INSERTED.Id, INSERTED.CardApiId, INSERTED.CardName, INSERTED.CardSet, INSERTED.CardNumber,
+                       INSERTED.ImageUrl, INSERTED.MarketPrice, INSERTED.ShopPrice, INSERTED.CreatedAt
+                WHERE Id = @Id AND UserId = @UserId;
+                """, connection);
+            command.Parameters.AddWithValue("@Id", id);
+            command.Parameters.AddWithValue("@UserId", userId);
+            command.Parameters.AddWithValue("@MarketPrice", DbValue(price.MarketPrice));
+            command.Parameters.AddWithValue("@ShopPrice", DbValue(price.ShopPrice));
+            await using var reader = await command.ExecuteReaderAsync();
+            return await reader.ReadAsync() ? ReadCard(reader) : null;
+        }
+
         public async Task DeleteCardAsync(int userId, int id)
         {
             await using var connection = new SqlConnection(_connectionString);
@@ -472,5 +677,59 @@ namespace CardShop.Api
             reader.GetDateTime(8));
 
         private static object DbValue(object? value) => value is null ? DBNull.Value : value;
+    }
+
+    public sealed class EmailSender(IConfiguration configuration)
+    {
+        private readonly IConfigurationSection _emailConfig = configuration.GetSection("Email");
+
+        public bool IsConfigured =>
+            !string.IsNullOrWhiteSpace(_emailConfig["SmtpHost"])
+            && !string.IsNullOrWhiteSpace(_emailConfig["FromAddress"]);
+
+        public async Task SendPasswordResetAsync(string toEmail, string username, string resetUrl)
+        {
+            var host = _emailConfig["SmtpHost"];
+            var fromAddress = _emailConfig["FromAddress"];
+            if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(fromAddress))
+            {
+                throw new InvalidOperationException("Email:SmtpHost and Email:FromAddress are required.");
+            }
+
+            var port = int.TryParse(_emailConfig["SmtpPort"], out var configuredPort) ? configuredPort : 587;
+            var enableSsl = !bool.TryParse(_emailConfig["EnableSsl"], out var configuredSsl) || configuredSsl;
+            var fromName = string.IsNullOrWhiteSpace(_emailConfig["FromName"]) ? "J&C PokePawns" : _emailConfig["FromName"];
+
+            using var message = new MailMessage
+            {
+                From = new MailAddress(fromAddress, fromName),
+                Subject = "Reset your J&C PokePawns password",
+                Body = $"""
+                    Hi {username},
+
+                    Click the link below to reset your password. This link expires in 1 hour.
+
+                    {resetUrl}
+
+                    If you did not ask to reset your password, you can ignore this email.
+                    """,
+                IsBodyHtml = false
+            };
+            message.To.Add(toEmail);
+
+            using var client = new SmtpClient(host, port)
+            {
+                EnableSsl = enableSsl
+            };
+
+            var smtpUser = _emailConfig["SmtpUser"];
+            var smtpPassword = _emailConfig["SmtpPassword"];
+            if (!string.IsNullOrWhiteSpace(smtpUser) && !string.IsNullOrWhiteSpace(smtpPassword))
+            {
+                client.Credentials = new NetworkCredential(smtpUser, smtpPassword);
+            }
+
+            await client.SendMailAsync(message);
+        }
     }
 }

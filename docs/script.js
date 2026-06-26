@@ -115,11 +115,20 @@ const cardSetSuggestions = document.querySelector("#cardSetSuggestions");
 const savedCardsBaseKey = "jc-pokepawns-scanned-cards";
 const accountsKey = "jc-pokepawns-accounts";
 const sessionKey = "jc-pokepawns-session";
+const localPasswordResetKey = "jc-pokepawns-password-reset";
 const apiTokenKey = "jc-pokepawns-api-token";
 const apiUserKey = "jc-pokepawns-api-user";
+const avatarBaseKey = "jc-pokepawns-avatar";
+const purchaseBaseKey = "jc-pokepawns-purchases";
 const configuredApiBaseUrl = (window.CARDSHOP_API_BASE_URL || "").replace(/\/$/, "");
 let cachedSetCards = [];
 let cachedSetCardsName = "";
+let cachedNameCards = [];
+let cachedNameQuery = "";
+let nameSuggestionRequestId = 0;
+let setSuggestionRequestId = 0;
+let nameSuggestionController = null;
+let setSuggestionController = null;
 
 function setScannerStatus(message) {
   if (scannerStatus) {
@@ -185,6 +194,7 @@ async function apiRequest(path, options = {}) {
     }
     const requestError = new Error(message);
     requestError.duplicateFields = duplicateFields;
+    requestError.status = response.status;
     throw requestError;
   }
 
@@ -216,7 +226,227 @@ function getActiveUser() {
 
 function currentSavedCardsKey() {
   const user = getActiveUser();
-  return user ? `${savedCardsBaseKey}-${user.id}` : `${savedCardsBaseKey}-guest`;
+  return user ? savedCardsKeyForUser(user) : `${savedCardsBaseKey}-guest`;
+}
+
+function savedCardsKeyForUser(user) {
+  return `${savedCardsBaseKey}-${user.id}`;
+}
+
+function avatarKeyForUser(user) {
+  return `${avatarBaseKey}-${user.id}`;
+}
+
+function purchasesKeyForUser(user) {
+  return `${purchaseBaseKey}-${user.id}`;
+}
+
+function getAccountAvatar(user) {
+  if (!user?.id) {
+    return "";
+  }
+
+  return localStorage.getItem(avatarKeyForUser(user)) || "";
+}
+
+function setAccountAvatar(user, value) {
+  if (!user?.id) {
+    return;
+  }
+
+  const key = avatarKeyForUser(user);
+  if (value) {
+    localStorage.setItem(key, value);
+  } else {
+    localStorage.removeItem(key);
+  }
+}
+
+function cardPriceValue(card) {
+  const value = Number(card.market ?? card.marketPrice ?? card.MarketPrice ?? card.shopPrice ?? card.ShopPrice);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function rewardCreditForSpend(spend) {
+  const rewardBlocks = Math.floor(spend / 100);
+  return rewardBlocks >= 3 ? Math.floor(rewardBlocks / 3) * 20 + (rewardBlocks % 3) * 5 : rewardBlocks * 5;
+}
+
+function purchaseAmountValue(purchase) {
+  const value = Number(purchase.amount ?? purchase.total ?? purchase.purchaseTotal ?? purchase.PurchaseTotal);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function getAccountPurchases(user) {
+  if (!user?.id) {
+    return [];
+  }
+
+  try {
+    const purchases = JSON.parse(localStorage.getItem(purchasesKeyForUser(user)));
+    return Array.isArray(purchases) ? purchases : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function accountRewardSummary(user, cards) {
+  const collectionValue = cards.reduce((sum, card) => sum + cardPriceValue(card), 0);
+  const purchaseSpend = getAccountPurchases(user).reduce((sum, purchase) => sum + purchaseAmountValue(purchase), 0);
+  const currentHundred = purchaseSpend % 100;
+  const nextRewardProgress = Math.round(currentHundred);
+  return {
+    cardCount: cards.length,
+    collectionValue,
+    purchaseSpend,
+    earnedCredit: rewardCreditForSpend(purchaseSpend),
+    nextRewardProgress,
+    nextRewardRemaining: Math.max(0, 100 - currentHundred)
+  };
+}
+
+function accountSummaryMarkup(user, summary, isLoading = false) {
+  const email = user.email || "No email saved";
+  const joined = formatTimestamp(user.createdAt);
+  const progressLabel = summary.nextRewardProgress >= 100 ? 100 : summary.nextRewardProgress;
+  const avatarUrl = getAccountAvatar(user);
+  const avatarMarkup = avatarUrl
+    ? `<img src="${escapeHtml(avatarUrl)}" alt="" aria-hidden="true">`
+    : escapeHtml((user.username || "?").slice(0, 1).toUpperCase());
+  return `
+    <div class="account-menu-header">
+      <span class="account-avatar">${avatarMarkup}</span>
+      <div>
+        <strong>${escapeHtml(user.username)}</strong>
+        <span>${escapeHtml(email)}</span>
+      </div>
+    </div>
+    <div class="account-avatar-tools">
+      <label class="account-avatar-file">
+        Choose avatar
+        <input id="accountAvatarFile" type="file" accept="image/*">
+      </label>
+      <form class="account-avatar-url-form" id="accountAvatarUrlForm">
+        <input id="accountAvatarUrl" type="text" placeholder="Paste image URL or path" value="${avatarUrl && !avatarUrl.startsWith("data:") ? escapeHtml(avatarUrl) : ""}" aria-label="Avatar image URL or local path">
+        <button type="submit">Use URL</button>
+      </form>
+      ${avatarUrl ? `<button class="account-avatar-remove" id="removeAccountAvatar" type="button">Remove avatar</button>` : ""}
+    </div>
+    <div class="account-reward-card">
+      <div class="account-reward-topline">
+        <span>Reward progress</span>
+        <strong>${money(summary.earnedCredit)} credit</strong>
+      </div>
+      <div class="account-progress-track" aria-label="Reward progress to the next $5 credit">
+        <span style="width: ${Math.min(progressLabel, 100)}%"></span>
+      </div>
+      <p>${summary.purchaseSpend > 0 ? `${money(summary.nextRewardRemaining)} in eligible purchases until your next $5 reward.` : "No eligible purchases recorded yet. Selling cards to us does not count toward rewards."}</p>
+    </div>
+    <div class="account-stat-grid">
+      <span>Saved cards<strong>${isLoading ? "-" : summary.cardCount}</strong></span>
+      <span>Collection value<strong>${isLoading ? "-" : money(summary.collectionValue)}</strong></span>
+    </div>
+    <dl class="account-detail-list">
+      <div><dt>Email</dt><dd>${escapeHtml(email)}</dd></div>
+      <div><dt>Member since</dt><dd>${joined || "Recently"}</dd></div>
+    </dl>
+    <div class="account-menu-actions">
+      <a class="account-menu-link" href="scanner.html" role="menuitem">View saved cards</a>
+      <a class="account-menu-link" href="loyaltyprogram.html" role="menuitem">Rewards details</a>
+      <button class="account-menu-link danger" id="logoutButton" type="button" role="menuitem">Logout</button>
+    </div>
+  `;
+}
+
+function closeAccountMenu() {
+  const menu = document.querySelector("#accountMenu");
+  const button = document.querySelector("#accountMenuButton");
+  if (menu) {
+    menu.hidden = true;
+  }
+  if (button) {
+    button.setAttribute("aria-expanded", "false");
+  }
+}
+
+async function updateAccountMenuSummary() {
+  const menu = document.querySelector("#accountMenu");
+  const user = getActiveUser();
+  if (!menu || !user || menu.hidden) {
+    return;
+  }
+
+  try {
+    const savedCards = await getSavedCards();
+    menu.innerHTML = accountSummaryMarkup(user, accountRewardSummary(user, savedCards));
+  } catch (error) {
+    menu.querySelector(".account-reward-card p").textContent = "Could not load your reward progress right now.";
+  }
+}
+
+function toggleAccountMenu() {
+  const menu = document.querySelector("#accountMenu");
+  const button = document.querySelector("#accountMenuButton");
+  if (!menu || !button) {
+    return;
+  }
+
+  const willOpen = menu.hidden;
+  menu.hidden = !willOpen;
+  button.setAttribute("aria-expanded", String(willOpen));
+  if (willOpen) {
+    updateAccountMenuSummary();
+  }
+}
+
+function refreshOpenAccountMenu() {
+  const menu = document.querySelector("#accountMenu");
+  const user = getActiveUser();
+  if (!menu || !user) {
+    return;
+  }
+
+  const savedCards = readLocalSavedCards(currentSavedCardsKey());
+  menu.innerHTML = accountSummaryMarkup(user, accountRewardSummary(user, savedCards), hasApiBackend());
+  if (!hasApiBackend()) {
+    return;
+  }
+
+  updateAccountMenuSummary();
+}
+
+function setAvatarFromFile(input) {
+  const user = getActiveUser();
+  const file = input.files?.[0];
+  if (!user || !file) {
+    return;
+  }
+
+  if (!file.type.startsWith("image/")) {
+    input.value = "";
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    setAccountAvatar(user, String(reader.result || ""));
+    input.value = "";
+    refreshOpenAccountMenu();
+  });
+  reader.readAsDataURL(file);
+}
+
+function setAvatarFromUrl(event) {
+  event.preventDefault();
+  const user = getActiveUser();
+  const input = event.target.querySelector("#accountAvatarUrl");
+  const url = input?.value.trim() || "";
+  if (!user || !url) {
+    return;
+  }
+
+  setAccountAvatar(user, url);
+  refreshOpenAccountMenu();
 }
 
 function formatTimestamp(dateValue) {
@@ -225,10 +455,12 @@ function formatTimestamp(dateValue) {
   if (isNaN(date.getTime())) return "";
   let hours = date.getHours();
   const minutes = date.getMinutes().toString().padStart(2, "0");
-  const seconds = date.getSeconds().toString().padStart(2, "0");
-  const amPm = hours >= 12 ? "PM" : "AM";
+  const amPm = hours >= 12 ? "pm" : "am";
   hours = hours % 12 || 12;
-  return `${hours.toString().padStart(2, "0")}/${minutes}/${seconds} (${amPm})`;
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const year = date.getFullYear().toString().slice(-2);
+  return `${hours}:${minutes}${amPm}, ${month}/${day}/${year}`;
 }
 
 function randomId() {
@@ -279,7 +511,7 @@ function injectAuthControls() {
         <button class="auth-close" id="authClose" type="button" aria-label="Close login">&times;</button>
         <p class="eyebrow dark" id="authModeLabel">Account</p>
         <h2 id="authTitle">Sign up or log in</h2>
-        <div class="auth-tabs">
+        <div class="auth-tabs" id="authTabs">
           <button class="auth-tab active" id="showSignup" type="button">Sign Up</button>
           <button class="auth-tab" id="showLogin" type="button">Login</button>
         </div>
@@ -304,6 +536,17 @@ function injectAuthControls() {
             <button class="password-toggle" type="button" data-password-toggle="loginPassword" aria-label="Show password" title="Show password">&#128065;</button>
           </div>
           <button class="btn btn-primary" type="submit">Login</button>
+          <button class="auth-reset-link" id="forgotPasswordButton" type="button" hidden>Forgot password?</button>
+        </form>
+        <form class="auth-form" id="resetPasswordForm" hidden>
+          <input id="resetEmail" name="email" type="hidden">
+          <input id="resetToken" name="token" type="hidden">
+          <label for="resetPassword">New password</label>
+          <div class="password-field">
+            <input class="form-control" id="resetPassword" name="password" type="password" autocomplete="new-password" required>
+            <button class="password-toggle" type="button" data-password-toggle="resetPassword" aria-label="Show password" title="Show password">&#128065;</button>
+          </div>
+          <button class="btn btn-primary" type="submit">Reset Password</button>
         </form>
         <p class="auth-message" id="authMessage">Accounts are saved in this browser for this static site.</p>
       </div>
@@ -360,13 +603,20 @@ function hideSignupThanks() {
 
 function setAuthMode(mode) {
   const isSignup = mode === "signup";
+  const isLogin = mode === "login";
+  const isReset = mode === "reset";
   document.querySelector("#signupForm").hidden = !isSignup;
-  document.querySelector("#loginForm").hidden = isSignup;
+  document.querySelector("#loginForm").hidden = !isLogin;
+  document.querySelector("#resetPasswordForm").hidden = !isReset;
+  document.querySelector("#authTabs").hidden = isReset;
   document.querySelector("#showSignup").classList.toggle("active", isSignup);
-  document.querySelector("#showLogin").classList.toggle("active", !isSignup);
-  document.querySelector("#authTitle").textContent = isSignup ? "Create your account" : "Welcome back";
-  document.querySelector("#authModeLabel").textContent = isSignup ? "Sign Up" : "Login";
-  document.querySelector("#authMessage").textContent = hasApiBackend() ? "Accounts are saved to the CardShop server." : "Accounts are saved in this browser for this static site.";
+  document.querySelector("#showLogin").classList.toggle("active", isLogin);
+  document.querySelector("#authTitle").textContent = isSignup ? "Create your account" : isReset ? "Reset your password" : "Welcome back";
+  document.querySelector("#authModeLabel").textContent = isSignup ? "Sign Up" : isReset ? "Password Reset" : "Login";
+  document.querySelector("#authMessage").textContent = isReset
+    ? "Choose a new password for your account."
+    : hasApiBackend() ? "Accounts are saved to the CardShop server." : "Accounts are saved in this browser for this static site.";
+  hideForgotPasswordButton();
 }
 
 function setAuthMessage(message) {
@@ -416,9 +666,24 @@ function markLoginPasswordError() {
   document.querySelector("label[for=\"loginPassword\"]")?.classList.add("is-duplicate-label");
 }
 
+function showForgotPasswordButton() {
+  const button = document.querySelector("#forgotPasswordButton");
+  if (button) {
+    button.hidden = false;
+  }
+}
+
+function hideForgotPasswordButton() {
+  const button = document.querySelector("#forgotPasswordButton");
+  if (button) {
+    button.hidden = true;
+  }
+}
+
 function clearLoginErrors() {
   clearLoginEmailError();
   clearLoginPasswordError();
+  hideForgotPasswordButton();
 }
 
 function togglePasswordVisibility(button) {
@@ -441,9 +706,26 @@ function renderAuthControls() {
   }
 
   const user = getActiveUser();
-  authControls.innerHTML = user
-    ? `<span class="auth-greeting">Hi, ${escapeHtml(user.username)}</span><button class="auth-link" id="logoutButton" type="button">Logout</button>`
-    : `<button class="auth-link" id="openLogin" type="button">Login</button><button class="btn btn-primary btn-sm" id="openSignup" type="button">Sign Up</button>`;
+  if (!user) {
+    authControls.innerHTML = `<button class="auth-link" id="openLogin" type="button">Login</button><button class="btn btn-primary btn-sm" id="openSignup" type="button">Sign Up</button>`;
+    return;
+  }
+
+  const avatarUrl = getAccountAvatar(user);
+  const greetingAvatar = avatarUrl
+    ? `<span class="auth-greeting-avatar"><img src="${escapeHtml(avatarUrl)}" alt="" aria-hidden="true"></span>`
+    : `<span class="auth-greeting-avatar">${escapeHtml((user.username || "?").slice(0, 1).toUpperCase())}</span>`;
+
+  authControls.innerHTML = `
+    <div class="account-menu-wrap">
+      <button class="auth-greeting" id="accountMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="accountMenu">
+        ${greetingAvatar}<span>Hi, ${escapeHtml(user.username)}</span>
+      </button>
+      <div class="account-menu" id="accountMenu" role="menu" hidden>
+        ${accountSummaryMarkup(user, accountRewardSummary(user, []), true)}
+      </div>
+    </div>
+  `;
 }
 
 async function createAccount(event) {
@@ -470,6 +752,7 @@ async function createAccount(event) {
         body: JSON.stringify({ username, email, password })
       });
       setApiSession(authResponse);
+      await syncLocalSavedCardsToApi(authResponse.user);
       event.target.reset();
       hideAuthModal();
       renderAuthControls();
@@ -536,6 +819,7 @@ async function loginAccount(event) {
         body: JSON.stringify({ email, password })
       });
       setApiSession(authResponse);
+      await syncLocalSavedCardsToApi(authResponse.user);
       event.target.reset();
       hideAuthModal();
       renderAuthControls();
@@ -545,6 +829,7 @@ async function loginAccount(event) {
         markLoginEmailError();
       } else if (error.message === "Password is incorrect.") {
         markLoginPasswordError();
+        showForgotPasswordButton();
       }
       setAuthMessage(error.message);
     }
@@ -561,6 +846,7 @@ async function loginAccount(event) {
 
   if (account.passwordHash !== await hashPassword(password, account.salt)) {
     markLoginPasswordError();
+    showForgotPasswordButton();
     setAuthMessage("Password is incorrect.");
     return;
   }
@@ -572,12 +858,161 @@ async function loginAccount(event) {
   renderSavedCards();
 }
 
+function buildPasswordResetUrl(email, token) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("resetToken", token);
+  url.searchParams.set("email", email);
+  url.hash = "";
+  return url.toString();
+}
+
+function currentResetUrlBase() {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+async function requestPasswordReset() {
+  const emailInput = document.querySelector("#loginEmail");
+  const email = emailInput?.value.trim().toLowerCase() || "";
+
+  if (!isValidEmail(email)) {
+    markLoginEmailError();
+    setAuthMessage("Enter the account email first, then request a reset link.");
+    return;
+  }
+
+  if (hasApiBackend()) {
+    try {
+      await apiRequest("/api/auth/request-password-reset", {
+        method: "POST",
+        body: JSON.stringify({ email, resetUrlBase: currentResetUrlBase() })
+      });
+      setAuthMessage("Password reset email sent. Check your inbox for the reset link.");
+    } catch (error) {
+      if (error.status === 404) {
+        setAuthMessage("Password reset is not available on the running API yet. Restart or redeploy the API, then try again.");
+        return;
+      }
+      if (error.message === "Email not registered.") {
+        markLoginEmailError();
+      }
+      setAuthMessage(error.message);
+    }
+    return;
+  }
+
+  const accounts = getAccounts();
+  const account = accounts.find((candidate) => candidate.email === email);
+  if (!account) {
+    markLoginEmailError();
+    setAuthMessage("Email not registered.");
+    return;
+  }
+
+  const token = randomId();
+  const resetRecord = {
+    email,
+    tokenHash: await hashPassword(token, account.salt),
+    expiresAt: Date.now() + 60 * 60 * 1000
+  };
+  localStorage.setItem(localPasswordResetKey, JSON.stringify(resetRecord));
+
+  const resetUrl = buildPasswordResetUrl(email, token);
+  const subject = encodeURIComponent("Reset your J&C PokePawns password");
+  const body = encodeURIComponent(`Click this link to reset your password. It expires in 1 hour.\n\n${resetUrl}`);
+  window.location.href = `mailto:${encodeURIComponent(email)}?subject=${subject}&body=${body}`;
+  setAuthMessage("Your email app should open with a reset link. Send that message to yourself, then open the link.");
+}
+
+function showPasswordResetForm(email, token) {
+  showAuthModal("reset");
+  document.querySelector("#resetEmail").value = email;
+  document.querySelector("#resetToken").value = token;
+}
+
+async function resetPassword(event) {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const email = form.get("email").trim().toLowerCase();
+  const token = form.get("token");
+  const password = form.get("password");
+
+  if (!password || password.length < 8) {
+    setAuthMessage("Password must be at least 8 characters.");
+    return;
+  }
+
+  if (hasApiBackend()) {
+    try {
+      await apiRequest("/api/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify({ email, token, password })
+      });
+      event.target.reset();
+      setAuthMode("login");
+      document.querySelector("#loginEmail").value = email;
+      setAuthMessage("Password updated. You can log in now.");
+      window.history.replaceState({}, document.title, currentResetUrlBase());
+    } catch (error) {
+      setAuthMessage(error.message);
+    }
+    return;
+  }
+
+  const accounts = getAccounts();
+  const account = accounts.find((candidate) => candidate.email === email);
+  let resetRecord = null;
+  try {
+    resetRecord = JSON.parse(localStorage.getItem(localPasswordResetKey));
+  } catch (error) {
+    resetRecord = null;
+  }
+
+  if (!account || !resetRecord || resetRecord.email !== email || resetRecord.expiresAt <= Date.now()) {
+    setAuthMessage("This reset link is invalid or expired.");
+    return;
+  }
+
+  const tokenHash = await hashPassword(token, account.salt);
+  if (tokenHash !== resetRecord.tokenHash) {
+    setAuthMessage("This reset link is invalid or expired.");
+    return;
+  }
+
+  account.passwordHash = await hashPassword(password, account.salt);
+  saveAccounts(accounts);
+  localStorage.removeItem(localPasswordResetKey);
+  event.target.reset();
+  setAuthMode("login");
+  document.querySelector("#loginEmail").value = email;
+  setAuthMessage("Password updated. You can log in now.");
+  window.history.replaceState({}, document.title, currentResetUrlBase());
+}
+
+function openPasswordResetFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("resetToken");
+  const email = params.get("email");
+  if (token && email) {
+    showPasswordResetForm(email.trim().toLowerCase(), token);
+  }
+}
+
 function initializeAuth() {
   injectAuthControls();
   highlightCurrentNavLink();
   renderAuthControls();
 
   document.addEventListener("click", (event) => {
+    if (event.target.closest("#accountMenuButton")) {
+      toggleAccountMenu();
+      return;
+    }
+    if (!event.target.closest("#accountMenu")) {
+      closeAccountMenu();
+    }
     if (event.target.closest("#openSignup")) {
       showAuthModal("signup");
     }
@@ -606,9 +1041,35 @@ function initializeAuth() {
     if (event.target.closest("#showLogin")) {
       setAuthMode("login");
     }
+    if (event.target.closest("#forgotPasswordButton")) {
+      requestPasswordReset();
+    }
+    if (event.target.closest("#removeAccountAvatar")) {
+      const user = getActiveUser();
+      setAccountAvatar(user, "");
+      refreshOpenAccountMenu();
+    }
     const passwordToggle = event.target.closest("[data-password-toggle]");
     if (passwordToggle) {
       togglePasswordVisibility(passwordToggle);
+    }
+  });
+
+  document.addEventListener("change", (event) => {
+    if (event.target.matches("#accountAvatarFile")) {
+      setAvatarFromFile(event.target);
+    }
+  });
+
+  document.addEventListener("submit", (event) => {
+    if (event.target.matches("#accountAvatarUrlForm")) {
+      setAvatarFromUrl(event);
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeAccountMenu();
     }
   });
 
@@ -616,8 +1077,20 @@ function initializeAuth() {
   if (signupPasswordInput) {
     signupPasswordInput.addEventListener("input", function () {
       const len = this.value.length;
-      if (len > 0 && len <= 6) {
-        this.setCustomValidity(`Please enter a password greater than 6 characters (you are currently using ${len} character${len === 1 ? "" : "s"})`);
+      if (len > 0 && len < 8) {
+        this.setCustomValidity(`Please enter a password at least 8 characters long (you are currently using ${len} character${len === 1 ? "" : "s"})`);
+      } else {
+        this.setCustomValidity("");
+      }
+    });
+  }
+
+  const resetPasswordInput = document.querySelector("#resetPassword");
+  if (resetPasswordInput) {
+    resetPasswordInput.addEventListener("input", function () {
+      const len = this.value.length;
+      if (len > 0 && len < 8) {
+        this.setCustomValidity(`Please enter a password at least 8 characters long (you are currently using ${len} character${len === 1 ? "" : "s"})`);
       } else {
         this.setCustomValidity("");
       }
@@ -649,10 +1122,15 @@ function initializeAuth() {
   });
 
   document.querySelector("#loginEmail")?.addEventListener("input", clearLoginEmailError);
-  document.querySelector("#loginPassword")?.addEventListener("input", clearLoginPasswordError);
+  document.querySelector("#loginPassword")?.addEventListener("input", () => {
+    clearLoginPasswordError();
+    hideForgotPasswordButton();
+  });
 
   document.querySelector("#signupForm")?.addEventListener("submit", createAccount);
   document.querySelector("#loginForm")?.addEventListener("submit", loginAccount);
+  document.querySelector("#resetPasswordForm")?.addEventListener("submit", resetPassword);
+  openPasswordResetFromUrl();
 }
 
 async function startScannerCamera() {
@@ -743,6 +1221,71 @@ async function getSavedCards() {
   }
 }
 
+function readLocalSavedCards(key) {
+  try {
+    const cards = JSON.parse(localStorage.getItem(key));
+    return Array.isArray(cards) ? cards : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function normalizeCardForApi(card) {
+  return {
+    cardApiId: card.cardApiId || card.id || null,
+    cardName: card.cardName || card.name || "",
+    cardSet: card.cardSet || card.set || null,
+    cardNumber: card.cardNumber || card.number || null,
+    imageUrl: card.imageUrl || card.image || null,
+    marketPrice: hasPrice(card.marketPrice ?? card.market) ? Number(card.marketPrice ?? card.market) : null,
+    shopPrice: hasPrice(card.shopPrice) ? Number(card.shopPrice) : null
+  };
+}
+
+function savedCardKey(card) {
+  const normalized = normalizeCardForApi(card);
+  return [
+    normalized.cardApiId || "",
+    normalized.cardName.toLowerCase(),
+    (normalized.cardSet || "").toLowerCase(),
+    (normalized.cardNumber || "").toLowerCase()
+  ].join("|");
+}
+
+async function syncLocalSavedCardsToApi(user) {
+  if (!hasApiBackend() || !user) {
+    return;
+  }
+
+  const localKeys = [`${savedCardsBaseKey}-guest`, savedCardsKeyForUser(user)];
+  const localCards = localKeys.flatMap(readLocalSavedCards);
+  if (!localCards.length) {
+    return;
+  }
+
+  const existingCards = await getSavedCards();
+  const existingKeys = new Set(existingCards.map(savedCardKey));
+  const cardsToImport = localCards
+    .filter((card) => normalizeCardForApi(card).cardName)
+    .filter((card) => {
+      const key = savedCardKey(card);
+      if (existingKeys.has(key)) {
+        return false;
+      }
+      existingKeys.add(key);
+      return true;
+    });
+
+  for (const card of cardsToImport.reverse()) {
+    await apiRequest("/api/cards", {
+      method: "POST",
+      body: JSON.stringify(normalizeCardForApi(card))
+    });
+  }
+
+  localKeys.forEach((key) => localStorage.removeItem(key));
+}
+
 async function saveCard(card) {
   const user = getActiveUser();
   if (!user) {
@@ -755,15 +1298,7 @@ async function saveCard(card) {
     try {
       await apiRequest("/api/cards", {
         method: "POST",
-        body: JSON.stringify({
-          cardApiId: card.id,
-          cardName: card.name,
-          cardSet: card.set,
-          cardNumber: card.number,
-          imageUrl: card.image,
-          marketPrice: hasPrice(card.market) ? card.market : null,
-          shopPrice: hasPrice(card.shopPrice) ? card.shopPrice : null
-        })
+        body: JSON.stringify(normalizeCardForApi(card))
       });
       await renderSavedCards();
     } catch (error) {
@@ -847,23 +1382,119 @@ function renderDatalist(target, options) {
     return;
   }
 
-  target.innerHTML = options.map((option) => {
-    const label = option.label ? ` label="${escapeHtml(option.label)}"` : "";
-    return `<option value="${escapeHtml(option.value)}"${label}></option>`;
+  if (!options.length) {
+    target.innerHTML = "";
+    target.hidden = true;
+    return;
+  }
+
+  target.innerHTML = options.slice(0, 18).map((option) => {
+    const label = option.label ? `<span>${escapeHtml(option.label)}</span>` : "";
+    const cardData = option.card ? ` data-card="${encodeURIComponent(JSON.stringify(option.card))}"` : "";
+    return `<button class="autocomplete-option" type="button" role="option" data-value="${escapeHtml(option.value)}"${cardData}>${escapeHtml(option.value)}${label}</button>`;
   }).join("");
+  target.hidden = false;
+}
+
+function renderSuggestionMessage(target, message) {
+  if (!target) {
+    return;
+  }
+
+  target.innerHTML = `<div class="autocomplete-option autocomplete-message">${escapeHtml(message)}</div>`;
+  target.hidden = false;
+}
+
+function hideSuggestions(target) {
+  if (target) {
+    target.hidden = true;
+  }
+}
+
+function hideAllSuggestions() {
+  hideSuggestions(cardNameSuggestions);
+  hideSuggestions(cardSetSuggestions);
 }
 
 function wildcardQueryText(text) {
   return text.trim().replace(/"/g, "").replace(/[^A-Za-z0-9 ':-]/g, " ").replace(/\s+/g, " ");
 }
 
-async function fetchCardSuggestions(queryText, pageSize = 12) {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 6500);
+function apiWildcardText(text) {
+  return wildcardQueryText(text).replace(/\s+/g, "*");
+}
+
+function startsWithIgnoreCase(value, prefix) {
+  return value.toLowerCase().startsWith(prefix.toLowerCase());
+}
+
+function cardDisplayNumber(card) {
+  const printedTotal = card.set?.printedTotal ? `/${card.set.printedTotal}` : "";
+  return card.number ? `${card.number}${printedTotal}` : "";
+}
+
+function cardSetName(card) {
+  return card.set?.name || "Unknown set";
+}
+
+function cardNameMatchesInput(card, text) {
+  return startsWithIgnoreCase(card.name, text);
+}
+
+function cardMatchesSetInput(card, setText) {
+  const setName = cardSetName(card);
+  const number = card.number || "";
+  const displayNumber = cardDisplayNumber(card);
+  const haystack = `${setName} ${number} ${displayNumber}`.toLowerCase();
+  return haystack.includes(setText.toLowerCase());
+}
+
+function cardNameOptionsFromCards(cards, text) {
+  return uniqueBy(
+    cards.filter((card) => cardNameMatchesInput(card, text)),
+    (card) => `${card.name.toLowerCase()}-${cardSetName(card).toLowerCase()}`
+  ).map((card) => ({
+    value: card.name,
+    label: cardSetName(card),
+    card
+  }));
+}
+
+function cardSetOptionsFromCards(cards, setText) {
+  const filteredResults = setText.length >= 1
+    ? cards.filter((card) => cardMatchesSetInput(card, setText))
+    : cards;
+
+  const setOptions = uniqueBy(filteredResults, (card) => cardSetName(card))
+    .filter((card) => !setText || startsWithIgnoreCase(cardSetName(card), setText) || !/^[A-Za-z]/.test(setText))
+    .map((card) => ({
+      value: cardSetName(card),
+      label: "Set",
+      card
+    }));
+
+  const numberOptions = uniqueBy(
+    filteredResults.filter((card) => cardDisplayNumber(card)),
+    (card) => `${card.set?.id || cardSetName(card)}-${cardDisplayNumber(card)}`
+  ).map((card) => ({
+    value: cardDisplayNumber(card),
+    label: cardSetName(card),
+    card
+  }));
+
+  return /^\d/.test(setText)
+    ? [...numberOptions, ...setOptions]
+    : [...setOptions, ...numberOptions];
+}
+
+async function fetchCardSuggestions(queryText, pageSize = 12, options = {}) {
+  const controller = options.controller || new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs || 3500);
   const query = encodeURIComponent(queryText);
+  const orderBy = encodeURIComponent(options.orderBy || "-set.releaseDate");
 
   try {
-    const response = await fetch(`https://api.pokemontcg.io/v2/cards?q=${query}&pageSize=${pageSize}&orderBy=-set.releaseDate`, {
+    const response = await fetch(`https://api.pokemontcg.io/v2/cards?q=${query}&pageSize=${pageSize}&orderBy=${orderBy}`, {
       signal: controller.signal
     });
     if (!response.ok) {
@@ -882,16 +1513,66 @@ async function fetchCardSuggestions(queryText, pageSize = 12) {
 async function updateCardNameSuggestions() {
   const text = wildcardQueryText(cardNameInput?.value || "");
   if (text.length < 2) {
+    if (nameSuggestionController) {
+      nameSuggestionController.abort();
+    }
     renderDatalist(cardNameSuggestions, []);
     return;
   }
 
-  const results = await fetchCardSuggestions(`name:*${text}*`, 16);
-  const names = uniqueBy(results, (card) => card.name.toLowerCase()).map((card) => ({
-    value: card.name,
-    label: card.set?.name || ""
-  }));
-  renderDatalist(cardNameSuggestions, names);
+  const canUseCachedNames = cachedNameQuery && text.toLowerCase().startsWith(cachedNameQuery.toLowerCase());
+  const cachedOptions = canUseCachedNames ? cardNameOptionsFromCards(cachedNameCards, text) : [];
+  if (cachedOptions.length) {
+    renderDatalist(cardNameSuggestions, cachedOptions);
+  } else {
+    renderSuggestionMessage(cardNameSuggestions, "Searching...");
+  }
+
+  if (nameSuggestionController) {
+    nameSuggestionController.abort();
+  }
+  nameSuggestionController = new AbortController();
+  const requestId = ++nameSuggestionRequestId;
+  cachedNameQuery = text;
+  let results = await fetchCardSuggestions(`name:${apiWildcardText(text)}*`, 40, {
+    controller: nameSuggestionController,
+    orderBy: "name",
+    timeoutMs: 2500
+  });
+  if (!results.length) {
+    results = await fetchCardSuggestions(`name:*${apiWildcardText(text)}*`, 40, {
+      controller: nameSuggestionController,
+      orderBy: "name",
+      timeoutMs: 2500
+    });
+  }
+
+  if (requestId !== nameSuggestionRequestId || text !== wildcardQueryText(cardNameInput?.value || "")) {
+    return;
+  }
+
+  cachedNameCards = results;
+  renderDatalist(cardNameSuggestions, cardNameOptionsFromCards(cachedNameCards, text));
+}
+
+async function refreshSetCardsForSelectedName(name) {
+  if (setSuggestionController) {
+    setSuggestionController.abort();
+  }
+  setSuggestionController = new AbortController();
+  const requestId = ++setSuggestionRequestId;
+  const exactCards = await fetchCardSuggestions(`name:"${name}"`, 120, {
+    controller: setSuggestionController,
+    timeoutMs: 3500
+  });
+  if (requestId !== setSuggestionRequestId || name !== wildcardQueryText(cardNameInput?.value || "")) {
+    return;
+  }
+
+  const matchingCards = exactCards.filter((card) => card.name.toLowerCase() === name.toLowerCase());
+  cachedSetCardsName = name;
+  cachedSetCards = matchingCards.length ? matchingCards : exactCards;
+  renderDatalist(cardSetSuggestions, cardSetOptionsFromCards(cachedSetCards, wildcardQueryText(cardSetInput?.value || "")));
 }
 
 async function updateCardSetSuggestions() {
@@ -902,31 +1583,38 @@ async function updateCardSetSuggestions() {
     return;
   }
 
-  if (name !== cachedSetCardsName) {
-    cachedSetCardsName = name;
-    cachedSetCards = await fetchCardSuggestions(`name:"${name}"`, 50);
+  if (name === cachedSetCardsName && cachedSetCards.length) {
+    renderDatalist(cardSetSuggestions, cardSetOptionsFromCards(cachedSetCards, setText));
   }
 
-  const filteredResults = setText.length >= 1
-    ? cachedSetCards.filter((card) => {
-      const setName = card.set?.name || "";
-      const number = card.number || "";
-      const printedTotal = card.set?.printedTotal ? `${card.set.printedTotal}` : "";
-      const displayNumber = `${number}${printedTotal ? `/${printedTotal}` : ""}`;
-      const haystack = `${setName} ${number} ${displayNumber}`.toLowerCase();
-      return haystack.includes(setText.toLowerCase());
-    })
-    : cachedSetCards;
-  const options = uniqueBy(filteredResults, (card) => `${card.set?.name || ""}-${card.number}`).map((card) => {
-    const setName = card.set?.name || "Unknown set";
-    const printedTotal = card.set?.printedTotal ? `/${card.set.printedTotal}` : "";
-    const number = card.number ? `${card.number}${printedTotal}` : setName;
-    return {
-      value: number,
-      label: setName
-    };
-  });
-  renderDatalist(cardSetSuggestions, options);
+  if (name !== cachedSetCardsName) {
+    if (setSuggestionController) {
+      setSuggestionController.abort();
+    }
+    setSuggestionController = new AbortController();
+    const requestId = ++setSuggestionRequestId;
+    cachedSetCardsName = name;
+    renderSuggestionMessage(cardSetSuggestions, "Searching...");
+    const exactCards = await fetchCardSuggestions(`name:"${name}"`, 60, {
+      controller: setSuggestionController,
+      timeoutMs: 3000
+    });
+    if (requestId !== setSuggestionRequestId || name !== wildcardQueryText(cardNameInput?.value || "")) {
+      return;
+    }
+    cachedSetCards = exactCards.some((card) => card.name.toLowerCase() === name.toLowerCase())
+      ? exactCards.filter((card) => card.name.toLowerCase() === name.toLowerCase())
+      : await fetchCardSuggestions(`name:${apiWildcardText(name)}*`, 60, {
+        controller: setSuggestionController,
+        orderBy: "name",
+        timeoutMs: 3000
+      });
+    if (requestId !== setSuggestionRequestId || name !== wildcardQueryText(cardNameInput?.value || "")) {
+      return;
+    }
+  }
+
+  renderDatalist(cardSetSuggestions, cardSetOptionsFromCards(cachedSetCards, setText));
 }
 
 function findLikelyCardName(text) {
@@ -1102,6 +1790,52 @@ async function fetchCards(queryText) {
   }
 }
 
+async function fetchCardByApiId(cardApiId) {
+  if (!cardApiId) {
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 7000);
+  try {
+    const response = await fetch(`https://api.pokemontcg.io/v2/cards/${encodeURIComponent(cardApiId)}`, {
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      return null;
+    }
+
+    const body = await response.json();
+    return body.data || null;
+  } catch (error) {
+    return null;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+function pokemonApiIdForSavedCard(card) {
+  const apiId = card.cardApiId || card.CardApiId;
+  if (apiId) {
+    return apiId;
+  }
+
+  const id = card.id || card.Id;
+  return typeof id === "string" && /[A-Za-z]/.test(id) ? id : null;
+}
+
+async function findCurrentCardForSavedCard(savedCard) {
+  const apiCard = await fetchCardByApiId(pokemonApiIdForSavedCard(savedCard));
+  if (apiCard) {
+    return apiCard;
+  }
+
+  const name = savedCard.name || savedCard.cardName || savedCard.CardName || "";
+  const setText = savedCard.number || savedCard.cardNumber || savedCard.CardNumber || savedCard.set || savedCard.cardSet || savedCard.CardSet || "";
+  const results = await fetchCards(buildCardQuery(name, setText));
+  return results[0] || null;
+}
+
 async function lookUpCard(event) {
   event.preventDefault();
   const name = new FormData(lookupForm).get("cardName");
@@ -1136,9 +1870,11 @@ async function renderSavedCards() {
 
   savedCardsTarget.innerHTML = savedCards.map((card) => {
     const timestamp = formatTimestamp(card.createdAt || card.CreatedAt);
-    const timestampHtml = timestamp ? `<span class="card-timestamp">Entered ${timestamp}</span>` : "";
+    const timestampHtml = timestamp ? `<span class="card-timestamp">Entered: ${timestamp}</span>` : "";
+    const refreshPayload = encodeURIComponent(JSON.stringify(card));
     return `
     <article class="saved-card">
+      <button class="refresh-price-button" type="button" data-card="${refreshPayload}" aria-label="Refresh price">Refresh price</button>
       <img src="${escapeHtml(card.image || card.imageUrl || "")}" alt="${escapeHtml(card.name || card.cardName)} card">
       <div>
         <h3>${escapeHtml(card.name || card.cardName)}</h3>
@@ -1149,6 +1885,59 @@ async function renderSavedCards() {
       </div>
     </article>`;
   }).join("");
+}
+
+async function refreshSavedCardPrice(savedCard, button) {
+  const savedId = savedCard.id || savedCard.Id;
+  if (!savedId) {
+    setScannerStatus("Could not refresh this card because it does not have a saved id.");
+    return;
+  }
+
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = "Refreshing...";
+
+  try {
+    const currentCard = await findCurrentCardForSavedCard(savedCard);
+    if (!currentCard) {
+      throw new Error("Could not find a current price for this card.");
+    }
+
+    const marketPrice = automaticCardValue(currentCard);
+    const shopPrice = hasPrice(marketPrice) ? marketPrice * 0.8 : null;
+
+    if (hasApiBackend()) {
+      await apiRequest(`/api/cards/${savedId}/price`, {
+        method: "PUT",
+        body: JSON.stringify({
+          marketPrice: hasPrice(marketPrice) ? marketPrice : null,
+          shopPrice
+        })
+      });
+    } else {
+      const cards = await getSavedCards();
+      const updatedCards = cards.map((card) => {
+        if ((card.id || card.Id) !== savedId) {
+          return card;
+        }
+        return {
+          ...card,
+          market: hasPrice(marketPrice) ? marketPrice : null,
+          marketPrice: hasPrice(marketPrice) ? marketPrice : null,
+          shopPrice
+        };
+      });
+      localStorage.setItem(currentSavedCardsKey(), JSON.stringify(updatedCards));
+    }
+
+    await renderSavedCards();
+    setScannerStatus(`Updated ${currentCard.name} to ${hasPrice(marketPrice) ? money(marketPrice) : "no current price"}.`);
+  } catch (error) {
+    setScannerStatus(error.message || "Could not refresh this card price.");
+    button.disabled = false;
+    button.textContent = originalText;
+  }
 }
 
 if (startCameraButton) {
@@ -1180,28 +1969,77 @@ if (lookupForm) {
   });
 }
 
+if (savedCardsTarget) {
+  savedCardsTarget.addEventListener("click", (event) => {
+    const button = event.target.closest(".refresh-price-button");
+    if (!button) {
+      return;
+    }
+
+    refreshSavedCardPrice(JSON.parse(decodeURIComponent(button.dataset.card)), button);
+  });
+}
+
 if (cardNameInput) {
-  cardNameInput.addEventListener("input", debounce(() => {
+  cardNameInput.addEventListener("input", () => {
     cachedSetCardsName = "";
     cachedSetCards = [];
     updateCardNameSuggestions();
-    updateCardSetSuggestions();
-  }, 300));
+    renderDatalist(cardSetSuggestions, []);
+  });
   cardNameInput.addEventListener("change", () => {
     cachedSetCardsName = "";
     cachedSetCards = [];
     updateCardSetSuggestions();
   });
+  cardNameInput.addEventListener("focus", () => {
+    updateCardNameSuggestions();
+  });
 }
 
 if (cardSetInput) {
-  cardSetInput.addEventListener("input", debounce(updateCardSetSuggestions, 300));
+  cardSetInput.addEventListener("input", updateCardSetSuggestions);
   cardSetInput.addEventListener("focus", () => {
-    if (!cardSetSuggestions?.children.length) {
-      updateCardSetSuggestions();
-    }
+    updateCardSetSuggestions();
   });
 }
+
+document.addEventListener("click", (event) => {
+  const option = event.target.closest(".autocomplete-option");
+  if (option) {
+    if (option.classList.contains("autocomplete-message")) {
+      return;
+    }
+
+    const menu = option.closest(".autocomplete-menu");
+    if (menu?.id === "cardNameSuggestions" && cardNameInput) {
+      const card = option.dataset.card ? JSON.parse(decodeURIComponent(option.dataset.card)) : null;
+      cardNameInput.value = option.dataset.value || "";
+      cardSetInput.value = card ? cardSetName(card) : "";
+      cachedSetCardsName = cardNameInput.value;
+      cachedSetCards = card ? [card] : [];
+      hideSuggestions(cardNameSuggestions);
+      updateCardSetSuggestions();
+      refreshSetCardsForSelectedName(cardNameInput.value);
+      cardSetInput.focus();
+      return;
+    }
+
+    if (menu?.id === "cardSetSuggestions" && cardSetInput) {
+      const card = option.dataset.card ? JSON.parse(decodeURIComponent(option.dataset.card)) : null;
+      cardSetInput.value = option.dataset.value || "";
+      if (card && cardNameInput && !cardNameInput.value.trim()) {
+        cardNameInput.value = card.name;
+      }
+      hideSuggestions(cardSetSuggestions);
+      return;
+    }
+  }
+
+  if (!event.target.closest(".autocomplete-field")) {
+    hideAllSuggestions();
+  }
+});
 
 if (clearSavedCardsButton) {
   clearSavedCardsButton.addEventListener("click", async () => {

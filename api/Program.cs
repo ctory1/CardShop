@@ -1,3 +1,11 @@
+/*
+ * CardShop
+ * Copyright © 2026 Colin Toryfter
+ * All Rights Reserved.
+ *
+ * Unauthorized copying or distribution of this file is prohibited.
+ */
+
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;

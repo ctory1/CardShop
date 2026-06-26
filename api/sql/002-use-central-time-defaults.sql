@@ -1,3 +1,11 @@
+/*
+ * CardShop
+ * Copyright © 2026 Colin Toryfter
+ * All Rights Reserved.
+ *
+ * Unauthorized copying or distribution of this file is prohibited.
+ */
+
 USE CardShop;
 GO
 

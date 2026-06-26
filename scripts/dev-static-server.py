@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+#
+# CardShop
+# Copyright © 2026 Colin Toryfter
+# All Rights Reserved.
+#
+# Unauthorized copying or distribution of this file is prohibited.
+
 import argparse
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer

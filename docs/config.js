@@ -1,3 +1,11 @@
+/*
+ * CardShop
+ * Copyright © 2026 Colin Toryfter
+ * All Rights Reserved.
+ *
+ * Unauthorized copying or distribution of this file is prohibited.
+ */
+
 // Public frontend config. This file is safe to publish.
 // When the API is running locally, this keeps the default:
 //   window.CARDSHOP_API_BASE_URL = "http://localhost:5000";

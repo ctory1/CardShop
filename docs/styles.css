@@ -1587,14 +1587,17 @@ footer {
   }
 
   .account-menu {
-    left: 0;
-    max-height: calc(100dvh - 9.5rem); /* 100vh was before */
+    left: 1rem;
+    top: 7rem;
+    right: auto;
+    position: fixed;
+
+    max-height: calc(100dvh - 7rem); /* 100vh was before */
     min-width: min(320px, calc(100vw - 2rem));
     overflow-y: auto;
     overscroll-behavior: contain;
-    right: auto;
     -webkit-overflow-scrolling: touch; 
-    padding-bottom: 5rem; /* added padding for mobile view */
+    padding-bottom: 10rem; /* added padding for mobile view */
   }
 
   .account-menu::before {

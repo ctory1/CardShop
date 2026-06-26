@@ -15,4 +15,4 @@
 //
 // To run in fully offline (no-backend) mode, leave it empty:
 //   window.CARDSHOP_API_BASE_URL = "";
-window.CARDSHOP_API_BASE_URL = "https://cardshop-api.azurewebsites.net";
+window.CARDSHOP_API_BASE_URL = "https://cardshop-api-cahrb7bmgubegjhb.centralus-01.azurewebsites.net";

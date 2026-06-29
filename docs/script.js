@@ -141,10 +141,21 @@ async function refreshStockCards() {
     return;
   }
 
-  renderStockCards(cards);
+  if (!hasApiBackend()) {
+    renderStockCards(cards);
+    return;
+  }
+
+  renderStockCards(cards.map((card) => ({
+    ...card,
+    market: null
+  })));
+
   const apiCards = await fetchApiStockCards();
   if (apiCards.length) {
     renderStockCards(apiCards);
+  } else {
+    renderStockCards(cards);
   }
 }
 

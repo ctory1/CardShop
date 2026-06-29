@@ -1,7 +1,7 @@
 param(
     [string]$ResourceGroup = "cardshop-api",
-    [string]$WebAppName = "cardshop-api-cahrb7bmgubegjhb",
-    [string]$ApiUrl = "https://cardshop-api-cahrb7bmgubegjhb.centralus-01.azurewebsites.net"
+    [string]$WebAppName = "cardshop-api",
+    [string]$ApiUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,6 +26,9 @@ try {
         Remove-Item -LiteralPath $publishDir -Recurse -Force
     }
     dotnet publish -c Release -o $publishDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish failed with exit code $LASTEXITCODE."
+    }
 
     Write-Host "Creating deployment zip..." -ForegroundColor Cyan
     if (Test-Path $zipPath) {
@@ -35,12 +38,23 @@ try {
 
     Write-Host "Deploying to Azure Web App '$WebAppName'..." -ForegroundColor Cyan
     az webapp deploy --resource-group $ResourceGroup --name $WebAppName --src-path $zipPath --type zip
+    if ($LASTEXITCODE -ne 0) {
+        throw "Azure deploy failed with exit code $LASTEXITCODE."
+    }
 }
 finally {
     Pop-Location
 }
 
-Write-Host "Checking live stock endpoint..." -ForegroundColor Cyan
+if ([string]::IsNullOrWhiteSpace($ApiUrl)) {
+    $hostName = az webapp show --resource-group $ResourceGroup --name $WebAppName --query "defaultHostName" -o tsv
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($hostName)) {
+        throw "Could not resolve the Web App hostname after deployment."
+    }
+    $ApiUrl = "https://$hostName"
+}
+
+Write-Host "Checking live stock endpoint at $ApiUrl..." -ForegroundColor Cyan
 $stock = Invoke-RestMethod "$ApiUrl/api/stock"
 $stock | Select-Object -First 10 apiId, name, set, market, shopPrice, condition, quantity | Format-Table -AutoSize
 

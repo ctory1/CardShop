@@ -554,6 +554,11 @@ function injectAuthControls() {
             <input class="form-control" id="resetPassword" name="password" type="password" autocomplete="new-password" required>
             <button class="password-toggle" type="button" data-password-toggle="resetPassword" aria-label="Show password" title="Show password">&#128065;</button>
           </div>
+          <label for="resetPasswordConfirm">Confirm new password</label>
+          <div class="password-field">
+            <input class="form-control" id="resetPasswordConfirm" name="confirmPassword" type="password" autocomplete="new-password" required>
+            <button class="password-toggle" type="button" data-password-toggle="resetPasswordConfirm" aria-label="Show password" title="Show password">&#128065;</button>
+          </div>
           <button class="btn btn-primary" type="submit">Reset Password</button>
         </form>
         <p class="auth-message" id="authMessage">Accounts are saved in this browser for this static site.</p>
@@ -634,6 +639,14 @@ function setAuthMessage(message) {
   }
 }
 
+function showPasswordResetEmailNotice(email) {
+  window.alert(`Password reset email sent to ${email}. Please check that inbox, including spam or junk, for the reset link.`);
+}
+
+function showPasswordResetSuccessNotice() {
+  window.alert("Thanks for resetting your password. You can log in with your new password now.");
+}
+
 function clearDuplicateSignupFields() {
   document.querySelectorAll("#signupForm .form-control.is-duplicate").forEach((el) => el.classList.remove("is-duplicate"));
   document.querySelectorAll("#signupForm .is-duplicate-label").forEach((el) => el.classList.remove("is-duplicate-label"));
@@ -705,6 +718,20 @@ function togglePasswordVisibility(button) {
   button.classList.toggle("is-visible", isHidden);
   button.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
   button.title = isHidden ? "Hide password" : "Show password";
+}
+
+function validateResetPasswordMatch() {
+  const passwordInput = document.querySelector("#resetPassword");
+  const confirmInput = document.querySelector("#resetPasswordConfirm");
+  if (!passwordInput || !confirmInput) {
+    return;
+  }
+
+  confirmInput.setCustomValidity(
+    confirmInput.value && passwordInput.value !== confirmInput.value
+      ? "Passwords must match."
+      : ""
+  );
 }
 
 function renderAuthControls() {
@@ -897,7 +924,8 @@ async function requestPasswordReset() {
         method: "POST",
         body: JSON.stringify({ email, resetUrlBase: currentResetUrlBase() })
       });
-      setAuthMessage("Password reset email sent. Check your inbox for the reset link.");
+      setAuthMessage(`Password reset email sent to ${email}. Check that inbox, spam, or junk folder for the reset link.`);
+      showPasswordResetEmailNotice(email);
     } catch (error) {
       if (error.message === "Email not registered.") {
         markLoginEmailError();
@@ -930,7 +958,8 @@ async function requestPasswordReset() {
   const subject = encodeURIComponent("Reset your J&C PokePawns password");
   const body = encodeURIComponent(`Click this link to reset your password. It expires in 1 hour.\n\n${resetUrl}`);
   window.location.href = `mailto:${encodeURIComponent(email)}?subject=${subject}&body=${body}`;
-  setAuthMessage("Your email app should open with a reset link. Send that message to yourself, then open the link.");
+  setAuthMessage(`Your email app should open with a reset link for ${email}. Send that message to yourself, then check that inbox, spam, or junk folder.`);
+  showPasswordResetEmailNotice(email);
 }
 
 function showPasswordResetForm(email, token) {
@@ -945,9 +974,15 @@ async function resetPassword(event) {
   const email = form.get("email").trim().toLowerCase();
   const token = form.get("token");
   const password = form.get("password");
+  const confirmPassword = form.get("confirmPassword");
 
   if (!password || password.length < 8) {
     setAuthMessage("Password must be at least 8 characters.");
+    return;
+  }
+
+  if (password !== confirmPassword) {
+    setAuthMessage("The two password fields need to match.");
     return;
   }
 
@@ -962,6 +997,7 @@ async function resetPassword(event) {
       document.querySelector("#loginEmail").value = email;
       setAuthMessage("Password updated. You can log in now.");
       window.history.replaceState({}, document.title, currentResetUrlBase());
+      showPasswordResetSuccessNotice();
     } catch (error) {
       setAuthMessage(error.message);
     }
@@ -996,6 +1032,7 @@ async function resetPassword(event) {
   document.querySelector("#loginEmail").value = email;
   setAuthMessage("Password updated. You can log in now.");
   window.history.replaceState({}, document.title, currentResetUrlBase());
+  showPasswordResetSuccessNotice();
 }
 
 function openPasswordResetFromUrl() {
@@ -1101,8 +1138,11 @@ function initializeAuth() {
       } else {
         this.setCustomValidity("");
       }
+      validateResetPasswordMatch();
     });
   }
+
+  document.querySelector("#resetPasswordConfirm")?.addEventListener("input", validateResetPasswordMatch);
 
   // Clear duplicate field highlighting when user types in those fields
   document.querySelectorAll("#signupUsername, #signupEmail").forEach((input) => {

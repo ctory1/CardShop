@@ -899,12 +899,11 @@ async function requestPasswordReset() {
       });
       setAuthMessage("Password reset email sent. Check your inbox for the reset link.");
     } catch (error) {
-      if (error.status === 404) {
-        setAuthMessage("Password reset is not available on the running API yet. Restart or redeploy the API, then try again.");
-        return;
-      }
       if (error.message === "Email not registered.") {
         markLoginEmailError();
+      } else if (error.status === 404) {
+        setAuthMessage("Password reset is not available on the running API yet. Restart or redeploy the API, then try again.");
+        return;
       }
       setAuthMessage(error.message);
     }

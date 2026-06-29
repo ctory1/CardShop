@@ -15,18 +15,6 @@ dotnet user-secrets init
 dotnet user-secrets set "ConnectionStrings:CardShop" "Server=localhost;Database=CardShop;Trusted_Connection=True;TrustServerCertificate=True;"
 ```
 
-For password reset emails, also configure SMTP:
-
-```powershell
-dotnet user-secrets set "Email:SmtpHost" "smtp.example.com"
-dotnet user-secrets set "Email:SmtpPort" "587"
-dotnet user-secrets set "Email:EnableSsl" "true"
-dotnet user-secrets set "Email:SmtpUser" "smtp-user"
-dotnet user-secrets set "Email:SmtpPassword" "smtp-password"
-dotnet user-secrets set "Email:FromAddress" "no-reply@example.com"
-dotnet user-secrets set "Email:FromName" "J&C PokePawns"
-```
-
 4. Run the API:
 
 ```powershell

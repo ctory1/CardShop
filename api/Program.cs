@@ -171,9 +171,14 @@ app.MapPost("/api/auth/request-password-reset", async (
             statusCode: StatusCodes.Status500InternalServerError);
     }
 
-    var resetUrlBase = !string.IsNullOrWhiteSpace(request.ResetUrlBase)
-        ? request.ResetUrlBase.Trim()
-        : $"{httpRequest.Scheme}://{httpRequest.Host}/";
+    var resetUrlBase = ResolveResetUrlBase(emailSender.ResetUrlBase, request.ResetUrlBase, httpRequest, allowedOrigins);
+    if (resetUrlBase is null)
+    {
+        return Results.Json(
+            new { message = "Password reset URL is not configured correctly on the server." },
+            statusCode: StatusCodes.Status500InternalServerError);
+    }
+
     var resetUrl = $"{resetUrlBase}{(resetUrlBase.Contains('?') ? "&" : "?")}resetToken={Uri.EscapeDataString(resetToken)}&email={Uri.EscapeDataString(email)}";
 
     try
@@ -342,6 +347,50 @@ static string? GetBearerToken(HttpRequest request)
     return authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
         ? authorization["Bearer ".Length..].Trim()
         : null;
+}
+
+static string? ResolveResetUrlBase(string? configuredResetUrlBase, string? requestedResetUrlBase, HttpRequest request, IReadOnlyCollection<string> allowedOrigins)
+{
+    if (IsHttpUrl(configuredResetUrlBase))
+    {
+        return configuredResetUrlBase!.Trim();
+    }
+
+    if (IsAllowedResetUrlBase(requestedResetUrlBase, allowedOrigins))
+    {
+        return requestedResetUrlBase!.Trim();
+    }
+
+    var apiUrlBase = $"{request.Scheme}://{request.Host}/";
+    return IsHttpUrl(apiUrlBase) ? apiUrlBase : null;
+}
+
+static bool IsAllowedResetUrlBase(string? resetUrlBase, IReadOnlyCollection<string> allowedOrigins)
+{
+    var resetOrigin = NormalizeOrigin(resetUrlBase);
+    if (resetOrigin is null)
+    {
+        return false;
+    }
+
+    return allowedOrigins
+        .Select(NormalizeOrigin)
+        .Where(origin => origin is not null)
+        .Any(origin => string.Equals(origin, resetOrigin, StringComparison.OrdinalIgnoreCase));
+}
+
+static bool IsHttpUrl(string? url)
+{
+    return Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
+}
+
+static string? NormalizeOrigin(string? url)
+{
+    return Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
+            ? $"{uri.Scheme}://{uri.Authority}"
+            : null;
 }
 
 static async Task<AppUser?> GetAuthenticatedUser(HttpRequest request, Database db)
@@ -694,6 +743,8 @@ namespace CardShop.Api
         public bool IsConfigured =>
             !string.IsNullOrWhiteSpace(_emailConfig["SmtpHost"])
             && !string.IsNullOrWhiteSpace(_emailConfig["FromAddress"]);
+
+        public string? ResetUrlBase => _emailConfig["ResetUrlBase"];
 
         public async Task SendPasswordResetAsync(string toEmail, string username, string resetUrl)
         {

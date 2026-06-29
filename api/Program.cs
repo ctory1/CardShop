@@ -8,6 +8,7 @@
 
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using CardShop.Api;
 using Microsoft.AspNetCore.Identity;
@@ -44,6 +45,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddSingleton<PasswordHasher<AppUser>>();
 builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<EmailSender>();
+builder.Services.AddHttpClient<StockPriceService>();
 builder.Services.AddHttpContextAccessor();
 
 var app = builder.Build();
@@ -55,6 +57,9 @@ if (!app.Environment.IsDevelopment())
 app.UseCors();
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
+
+app.MapGet("/api/stock", async (StockPriceService stockPriceService) =>
+    Results.Ok(await stockPriceService.GetStockAsync()));
 
 app.MapPost("/api/auth/signup", async (
     SignupRequest request,
@@ -486,6 +491,180 @@ namespace CardShop.Api
         decimal? MarketPrice,
         decimal? ShopPrice,
         DateTime CreatedAt);
+
+    public sealed record StockCardResponse(
+        string ApiId,
+        string Name,
+        string Set,
+        decimal Market,
+        decimal ShopPrice,
+        string Image,
+        string Condition,
+        DateOnly PriceDate);
+
+    public sealed class StockPriceService(HttpClient httpClient)
+    {
+        private static readonly TimeZoneInfo ShopTimeZone = ResolveShopTimeZone();
+        private static readonly IReadOnlyList<StockCard> StockCards = [
+            new("sv3pt5-199", "Charizard ex Special Illustration Rare", "Pokémon 151", 395m, "https://images.pokemontcg.io/sv3pt5/199_hires.png", "Near Mint"),
+            new("swsh7-215", "Umbreon VMAX Alternate Art", "Evolving Skies", 2037m, "https://images.pokemontcg.io/swsh7/215_hires.png", "Near Mint"),
+            new("swsh11-186", "Giratina V Alternate Art", "Lost Origin", 777m, "https://images.pokemontcg.io/swsh11/186_hires.png", "Near Mint"),
+            new("swsh7-218", "Rayquaza VMAX Alternate Art", "Evolving Skies", 962m, "https://images.pokemontcg.io/swsh7/218_hires.png", "Light Play"),
+            new("swsh12-186", "Lugia V Alternate Art", "Silver Tempest", 516m, "https://images.pokemontcg.io/swsh12/186_hires.png", "Near Mint"),
+            new("svp-85", "Pikachu with Grey Felt Hat", "Promo", 970m, "https://images.pokemontcg.io/svp/85_hires.png", "Near Mint")
+        ];
+
+        private readonly SemaphoreSlim _refreshLock = new(1, 1);
+        private IReadOnlyList<StockCardResponse>? _cachedStock;
+        private DateOnly? _cachedDate;
+
+        public async Task<IReadOnlyList<StockCardResponse>> GetStockAsync()
+        {
+            var today = TodayInShopTime();
+            if (_cachedStock is not null && _cachedDate == today)
+            {
+                return _cachedStock;
+            }
+
+            await _refreshLock.WaitAsync();
+            try
+            {
+                today = TodayInShopTime();
+                if (_cachedStock is not null && _cachedDate == today)
+                {
+                    return _cachedStock;
+                }
+
+                var refresh = await RefreshStockAsync(today);
+                if (refresh.HasLivePrice)
+                {
+                    _cachedStock = refresh.Cards;
+                    _cachedDate = today;
+                }
+
+                return refresh.Cards;
+            }
+            finally
+            {
+                _refreshLock.Release();
+            }
+        }
+
+        private async Task<StockRefreshResult> RefreshStockAsync(DateOnly priceDate)
+        {
+            var cards = new List<StockCardResponse>();
+            var hasLivePrice = false;
+            foreach (var card in StockCards)
+            {
+                var apiCard = await FetchPokemonCardAsync(card.ApiId);
+                var liveMarket = ReadMarketPrice(apiCard);
+                var market = liveMarket ?? card.FallbackMarket;
+                hasLivePrice = hasLivePrice || liveMarket is not null;
+                var image = ReadString(apiCard, "images", "large") ?? card.Image;
+                cards.Add(new StockCardResponse(
+                    card.ApiId,
+                    card.Name,
+                    card.Set,
+                    market,
+                    market * 0.8m,
+                    image,
+                    card.Condition,
+                    priceDate));
+            }
+
+            return new StockRefreshResult(cards, hasLivePrice);
+        }
+
+        private async Task<JsonElement?> FetchPokemonCardAsync(string apiId)
+        {
+            try
+            {
+                using var response = await httpClient.GetAsync($"https://api.pokemontcg.io/v2/cards/{Uri.EscapeDataString(apiId)}");
+                if (!response.IsSuccessStatusCode)
+                {
+                    return null;
+                }
+
+                using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+                return document.RootElement.TryGetProperty("data", out var data) ? data.Clone() : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static decimal? ReadMarketPrice(JsonElement? card)
+        {
+            if (card is null ||
+                !card.Value.TryGetProperty("tcgplayer", out var tcgplayer) ||
+                !tcgplayer.TryGetProperty("prices", out var prices))
+            {
+                return null;
+            }
+
+            foreach (var priceName in new[] { "market", "mid", "low", "directLow" })
+            {
+                foreach (var priceGroup in prices.EnumerateObject())
+                {
+                    if (priceGroup.Value.TryGetProperty(priceName, out var price) &&
+                        price.TryGetDecimal(out var value) &&
+                        value > 0)
+                    {
+                        return value;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static string? ReadString(JsonElement? element, params string[] path)
+        {
+            if (element is null)
+            {
+                return null;
+            }
+
+            var current = element.Value;
+            foreach (var part in path)
+            {
+                if (!current.TryGetProperty(part, out current))
+                {
+                    return null;
+                }
+            }
+
+            return current.GetString();
+        }
+
+        private static DateOnly TodayInShopTime()
+        {
+            return DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ShopTimeZone));
+        }
+
+        private static TimeZoneInfo ResolveShopTimeZone()
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById("Central Standard Time");
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
+            }
+        }
+
+        private sealed record StockCard(
+            string ApiId,
+            string Name,
+            string Set,
+            decimal FallbackMarket,
+            string Image,
+            string Condition);
+
+        private sealed record StockRefreshResult(IReadOnlyList<StockCardResponse> Cards, bool HasLivePrice);
+    }
 
     public sealed class Database(IConfiguration configuration)
     {

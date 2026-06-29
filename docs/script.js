@@ -8,6 +8,7 @@
 
 const cards = [
   {
+    apiId: "sv3pt5-199",
     name: "Charizard ex Special Illustration Rare",
     set: "Pokémon 151",
     market: 395,
@@ -15,6 +16,7 @@ const cards = [
     condition: "Near Mint"
   },
   {
+    apiId: "swsh7-215",
     name: "Umbreon VMAX Alternate Art",
     set: "Evolving Skies",
     market: 2037,
@@ -22,6 +24,7 @@ const cards = [
     condition: "Near Mint"
   },
   {
+    apiId: "swsh11-186",
     name: "Giratina V Alternate Art",
     set: "Lost Origin",
     market: 777,
@@ -29,6 +32,7 @@ const cards = [
     condition: "Near Mint"
   },
   {
+    apiId: "swsh7-218",
     name: "Rayquaza VMAX Alternate Art",
     set: "Evolving Skies",
     market: 962,
@@ -36,6 +40,7 @@ const cards = [
     condition: "Light Play"
   },
   {
+    apiId: "swsh12-186",
     name: "Lugia V Alternate Art",
     set: "Silver Tempest",
     market: 516,
@@ -43,6 +48,7 @@ const cards = [
     condition: "Near Mint"
   },
   {
+    apiId: "svp-85",
     name: "Pikachu with Grey Felt Hat",
     set: "Promo",
     market: 970,
@@ -74,7 +80,8 @@ function escapeHtml(value) {
 }
 
 function cardTemplate(card) {
-  const shopPrice = card.market * 0.8;
+  const market = hasPrice(card.market) ? card.market : 0;
+  const shopPrice = market * 0.8;
   return `
     <div class="col-sm-6 col-lg-4">
       <article class="pokemon-card">
@@ -86,8 +93,8 @@ function cardTemplate(card) {
           <h3>${card.name}</h3>
           <p>${card.set}</p>
           <div class="price-grid">
-            <span>Market</span><strong>${money(card.market)}</strong>
-            <span>Our Price</span><strong>${money(shopPrice)}</strong>
+            <span>Market</span><strong>${hasPrice(market) ? money(market) : "Checking"}</strong>
+            <span>Our Price</span><strong>${hasPrice(shopPrice) ? money(shopPrice) : "Checking"}</strong>
           </div>
         </div>
       </article>
@@ -95,15 +102,54 @@ function cardTemplate(card) {
   `;
 }
 
-const stockTarget = document.querySelector("#pokemonStock");
-if (stockTarget) {
-  stockTarget.innerHTML = cards.map(cardTemplate).join("");
+function renderStockCards(stockCards) {
+  const stockTarget = document.querySelector("#pokemonStock");
+  if (stockTarget) {
+    stockTarget.innerHTML = stockCards.map(cardTemplate).join("");
+  }
+
+  const featuredTarget = document.querySelector("#featuredCards");
+  if (featuredTarget) {
+    featuredTarget.innerHTML = stockCards.slice(0, 3).map(cardTemplate).join("");
+  }
 }
 
-const featuredTarget = document.querySelector("#featuredCards");
-if (featuredTarget) {
-  featuredTarget.innerHTML = cards.slice(0, 3).map(cardTemplate).join("");
+async function fetchApiStockCards() {
+  if (!hasApiBackend()) {
+    return [];
+  }
+
+  try {
+    const apiCards = await apiRequest("/api/stock");
+    return Array.isArray(apiCards)
+      ? apiCards.map((card) => ({
+        apiId: card.apiId,
+        name: card.name,
+        set: card.set,
+        market: Number(card.market),
+        image: card.image,
+        condition: card.condition
+      }))
+      : [];
+  } catch (error) {
+    return [];
+  }
 }
+
+async function refreshStockCards() {
+  if (!document.querySelector("#pokemonStock") && !document.querySelector("#featuredCards")) {
+    return;
+  }
+
+  renderStockCards(cards);
+  const apiCards = await fetchApiStockCards();
+  if (apiCards.length) {
+    renderStockCards(apiCards);
+  }
+}
+
+const stockTarget = document.querySelector("#pokemonStock");
+const featuredTarget = document.querySelector("#featuredCards");
 
 const scannerVideo = document.querySelector("#camera");
 const startCameraButton = document.querySelector("#startCamera");
@@ -129,6 +175,9 @@ const apiUserKey = "jc-pokepawns-api-user";
 const avatarBaseKey = "jc-pokepawns-avatar";
 const purchaseBaseKey = "jc-pokepawns-purchases";
 const configuredApiBaseUrl = (window.CARDSHOP_API_BASE_URL || "").replace(/\/$/, "");
+if (stockTarget || featuredTarget) {
+  refreshStockCards();
+}
 const usernameMinLength = 3;
 const usernameMaxLength = 50;
 let cachedSetCards = [];

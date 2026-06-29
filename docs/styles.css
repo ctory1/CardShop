@@ -1188,6 +1188,15 @@ h2 {
   padding: 0.35rem 0.7rem;
 }
 
+.pokemon-card .condition {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+  width: max-content;
+  max-width: 100%;
+  text-align: center;
+}
+
 .price-grid {
   display: grid;
   grid-template-columns: 1fr auto;

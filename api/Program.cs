@@ -249,17 +249,8 @@ app.MapGet("/api/me", async (HttpRequest request, Database db) =>
         : Results.Ok(UserDto.FromUser(user));
 });
 
-app.MapDelete("/api/me", async (HttpRequest request, Database db) =>
-{
-    var user = await GetAuthenticatedUser(request, db);
-    if (user is null)
-    {
-        return Results.Unauthorized();
-    }
-
-    await db.DeleteUserAsync(user.Id);
-    return Results.NoContent();
-});
+app.MapDelete("/api/me", DeleteAuthenticatedUser);
+app.MapPost("/api/auth/delete-account", DeleteAuthenticatedUser);
 
 app.MapGet("/api/cards", async (HttpRequest request, Database db) =>
 {
@@ -414,6 +405,18 @@ static async Task<AppUser?> GetAuthenticatedUser(HttpRequest request, Database d
     }
 
     return await db.GetUserBySessionAsync(HashToken(token));
+}
+
+static async Task<IResult> DeleteAuthenticatedUser(HttpRequest request, Database db)
+{
+    var user = await GetAuthenticatedUser(request, db);
+    if (user is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    await db.DeleteUserAsync(user.Id);
+    return Results.NoContent();
 }
 
 namespace CardShop.Api

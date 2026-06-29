@@ -137,6 +137,7 @@ let nameSuggestionRequestId = 0;
 let setSuggestionRequestId = 0;
 let nameSuggestionController = null;
 let setSuggestionController = null;
+let accountActionModalResolver = null;
 
 function setScannerStatus(message) {
   if (scannerStatus) {
@@ -474,21 +475,42 @@ async function deleteCurrentAccount() {
     return;
   }
 
-  const confirmed = window.confirm(`Delete the account for ${user.email || user.username}? This permanently deletes the account and all saved account data. This cannot be undone.`);
+  const accountLabel = user.email || user.username;
+  const confirmed = await showAccountActionModal({
+    label: "Permanent Action",
+    title: "Delete this account?",
+    message: `This will permanently delete ${accountLabel} and all saved account data. This cannot be undone.`,
+    confirmText: "Delete Account",
+    cancelText: "Keep Account",
+    danger: true
+  });
   if (!confirmed) {
     return;
   }
 
   if (hasApiBackend()) {
     try {
-      await apiRequest("/api/me", { method: "DELETE" });
+      await apiRequest("/api/auth/delete-account", { method: "POST" });
       clearUserLocalData(user);
       clearApiSession();
       renderAuthControls();
       await renderSavedCards();
-      window.alert("Your account has been permanently deleted.");
+      await showAccountActionModal({
+        label: "Account Deleted",
+        title: "Account deleted",
+        message: "Your account and saved account data have been permanently deleted.",
+        confirmText: "Done"
+      });
     } catch (error) {
-      window.alert(error.message || "Could not delete your account right now.");
+      const message = error.status === 404 || error.status === 405
+        ? "The live API does not have account deletion yet. Redeploy the API, then try again."
+        : error.message || "Could not delete your account right now.";
+      await showAccountActionModal({
+        label: "Could Not Delete",
+        title: "Account was not deleted",
+        message,
+        confirmText: "OK"
+      });
     }
     return;
   }
@@ -498,7 +520,12 @@ async function deleteCurrentAccount() {
   localStorage.removeItem(sessionKey);
   renderAuthControls();
   await renderSavedCards();
-  window.alert("Your account has been permanently deleted.");
+  await showAccountActionModal({
+    label: "Account Deleted",
+    title: "Account deleted",
+    message: "Your account and saved account data have been permanently deleted.",
+    confirmText: "Done"
+  });
 }
 
 function formatTimestamp(dateValue) {
@@ -621,6 +648,20 @@ function injectAuthControls() {
       </div>
     </div>
   `);
+
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="auth-modal account-action-modal" id="accountActionModal" hidden>
+      <div class="auth-dialog account-action-dialog" role="dialog" aria-modal="true" aria-labelledby="accountActionTitle">
+        <p class="eyebrow dark" id="accountActionLabel">Account</p>
+        <h2 id="accountActionTitle">Confirm action</h2>
+        <p class="account-action-message" id="accountActionMessage"></p>
+        <div class="account-action-buttons">
+          <button class="account-action-secondary" id="accountActionCancel" type="button">Cancel</button>
+          <button class="btn btn-primary account-action-confirm" id="accountActionConfirm" type="button">Continue</button>
+        </div>
+      </div>
+    </div>
+  `);
 }
 
 function showAuthModal(mode = "signup") {
@@ -655,6 +696,44 @@ function hideSignupThanks() {
   const modal = document.querySelector("#signupThanksModal");
   if (modal) {
     modal.hidden = true;
+  }
+}
+
+function showAccountActionModal({ label = "Account", title, message, confirmText = "OK", cancelText = "", danger = false }) {
+  const modal = document.querySelector("#accountActionModal");
+  const labelEl = document.querySelector("#accountActionLabel");
+  const titleEl = document.querySelector("#accountActionTitle");
+  const messageEl = document.querySelector("#accountActionMessage");
+  const cancelButton = document.querySelector("#accountActionCancel");
+  const confirmButton = document.querySelector("#accountActionConfirm");
+  if (!modal || !labelEl || !titleEl || !messageEl || !cancelButton || !confirmButton) {
+    return Promise.resolve(true);
+  }
+
+  labelEl.textContent = label;
+  titleEl.textContent = title;
+  messageEl.textContent = message;
+  cancelButton.textContent = cancelText || "Cancel";
+  cancelButton.hidden = !cancelText;
+  confirmButton.textContent = confirmText;
+  confirmButton.classList.toggle("danger", danger);
+  modal.hidden = false;
+  confirmButton.focus();
+
+  return new Promise((resolve) => {
+    accountActionModalResolver = resolve;
+  });
+}
+
+function closeAccountActionModal(result) {
+  const modal = document.querySelector("#accountActionModal");
+  if (modal) {
+    modal.hidden = true;
+  }
+
+  if (accountActionModalResolver) {
+    accountActionModalResolver(result);
+    accountActionModalResolver = null;
   }
 }
 
@@ -1094,6 +1173,14 @@ function initializeAuth() {
   renderAuthControls();
 
   document.addEventListener("click", (event) => {
+    if (event.target.closest("#accountActionConfirm")) {
+      closeAccountActionModal(true);
+      return;
+    }
+    if (event.target.closest("#accountActionCancel")) {
+      closeAccountActionModal(false);
+      return;
+    }
     if (event.target.closest("#accountMenuButton")) {
       toggleAccountMenu();
       return;

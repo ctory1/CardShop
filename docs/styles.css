@@ -612,6 +612,55 @@ a:hover {
   font-weight: 950;
 }
 
+.account-action-dialog h2 {
+  text-decoration: none;
+}
+
+.account-action-message {
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.55;
+  margin: 0 0 1.2rem;
+}
+
+.account-action-buttons {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.account-action-secondary {
+  background: #fbfaf6;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--green);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+  padding: 0.75rem 0.9rem;
+}
+
+.account-action-secondary:hover,
+.account-action-secondary:focus-visible {
+  background: #eef6f4;
+  border-color: #bfd4cb;
+  outline: none;
+}
+
+.account-action-secondary[hidden] {
+  display: none;
+}
+
+.account-action-secondary[hidden] + .account-action-confirm {
+  grid-column: 1 / -1;
+}
+
+.account-action-confirm.danger {
+  background: var(--red);
+  border-color: var(--red);
+}
+
 .auth-close {
   background: transparent;
   border: 0;

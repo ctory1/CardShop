@@ -264,6 +264,13 @@ a:hover {
   width: 48px;
 }
 
+.account-menu-header .account-avatar {
+  display: inline-flex;
+  justify-content: center;
+  line-height: 1;
+  text-align: center;
+}
+
 .account-avatar img {
   border-radius: 50%;
   display: block;

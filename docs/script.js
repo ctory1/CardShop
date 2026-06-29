@@ -361,6 +361,7 @@ function accountSummaryMarkup(user, summary, isLoading = false) {
     <div class="account-menu-actions">
       <a class="account-menu-link" href="scanner.html" role="menuitem">View saved cards</a>
       <a class="account-menu-link" href="loyaltyprogram.html" role="menuitem">Rewards details</a>
+      <button class="account-menu-link danger" id="deleteAccountButton" type="button" role="menuitem">Delete Account</button>
       <button class="account-menu-link danger" id="logoutButton" type="button" role="menuitem">Logout</button>
     </div>
   `;
@@ -455,6 +456,49 @@ function setAvatarFromUrl(event) {
 
   setAccountAvatar(user, url);
   refreshOpenAccountMenu();
+}
+
+function clearUserLocalData(user) {
+  if (!user?.id) {
+    return;
+  }
+
+  localStorage.removeItem(savedCardsKeyForUser(user));
+  localStorage.removeItem(avatarKeyForUser(user));
+  localStorage.removeItem(purchasesKeyForUser(user));
+}
+
+async function deleteCurrentAccount() {
+  const user = getActiveUser();
+  if (!user) {
+    return;
+  }
+
+  const confirmed = window.confirm(`Delete the account for ${user.email || user.username}? This permanently deletes the account and all saved account data. This cannot be undone.`);
+  if (!confirmed) {
+    return;
+  }
+
+  if (hasApiBackend()) {
+    try {
+      await apiRequest("/api/me", { method: "DELETE" });
+      clearUserLocalData(user);
+      clearApiSession();
+      renderAuthControls();
+      await renderSavedCards();
+      window.alert("Your account has been permanently deleted.");
+    } catch (error) {
+      window.alert(error.message || "Could not delete your account right now.");
+    }
+    return;
+  }
+
+  saveAccounts(getAccounts().filter((account) => account.id !== user.id));
+  clearUserLocalData(user);
+  localStorage.removeItem(sessionKey);
+  renderAuthControls();
+  await renderSavedCards();
+  window.alert("Your account has been permanently deleted.");
 }
 
 function formatTimestamp(dateValue) {
@@ -1072,6 +1116,9 @@ function initializeAuth() {
       }
       renderAuthControls();
       renderSavedCards();
+    }
+    if (event.target.closest("#deleteAccountButton")) {
+      deleteCurrentAccount();
     }
     if (event.target.closest("#authClose")) {
       hideAuthModal();

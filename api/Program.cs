@@ -249,6 +249,18 @@ app.MapGet("/api/me", async (HttpRequest request, Database db) =>
         : Results.Ok(UserDto.FromUser(user));
 });
 
+app.MapDelete("/api/me", async (HttpRequest request, Database db) =>
+{
+    var user = await GetAuthenticatedUser(request, db);
+    if (user is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    await db.DeleteUserAsync(user.Id);
+    return Results.NoContent();
+});
+
 app.MapGet("/api/cards", async (HttpRequest request, Database db) =>
 {
     var user = await GetAuthenticatedUser(request, db);
@@ -712,6 +724,22 @@ namespace CardShop.Api
             command.Parameters.AddWithValue("@Id", id);
             command.Parameters.AddWithValue("@UserId", userId);
             await command.ExecuteNonQueryAsync();
+        }
+
+        public async Task DeleteUserAsync(int userId)
+        {
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+            await using var command = new SqlCommand("""
+                DELETE FROM ScannedCards WHERE UserId = @UserId;
+                DELETE FROM PasswordResetTokens WHERE UserId = @UserId;
+                DELETE FROM UserSessions WHERE UserId = @UserId;
+                DELETE FROM Users WHERE Id = @UserId;
+                """, connection, (SqlTransaction)transaction);
+            command.Parameters.AddWithValue("@UserId", userId);
+            await command.ExecuteNonQueryAsync();
+            await transaction.CommitAsync();
         }
 
         private static AppUser ReadUser(SqlDataReader reader) => new()

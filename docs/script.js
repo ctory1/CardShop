@@ -201,18 +201,17 @@ async function refreshStockCards() {
   const cachedCards = cachedApiStockCards();
   if (cachedCards.length) {
     renderStockCards(cachedCards);
-    return;
+  } else {
+    renderStockCards(cards.map((card) => ({
+      ...card,
+      market: null
+    })));
   }
-
-  renderStockCards(cards.map((card) => ({
-    ...card,
-    market: null
-  })));
 
   const apiCards = await fetchApiStockCards();
   if (apiCards.length) {
     renderStockCards(apiCards);
-  } else {
+  } else if (!cachedCards.length) {
     renderStockCards(cards);
   }
 }

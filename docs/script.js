@@ -2083,7 +2083,7 @@ function sourceRows(sources) {
 
 function resultCardTemplate(card, priceSources) {
   const market = average(priceSources.map((source) => source.value));
-  const shopPrice = hasPrice(market) ? Math.ceil(market * 0.8) : 0;
+  const shopPrice = hasPrice(market) ? market * 0.8 : 0;
   const image = card.images?.small || card.images?.large || "";
   const name = escapeHtml(card.name);
   const setName = escapeHtml(card.set?.name || "Unknown set");

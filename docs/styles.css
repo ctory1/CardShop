@@ -1190,7 +1190,7 @@ h2 {
 
 .pokemon-card .condition {
   display: inline-block;
-  margin-left: 0;
+  margin-left: -6px;   /* adjust condition pill box position */
   margin-right: 0;
   max-width: 100%;
   text-align: left;

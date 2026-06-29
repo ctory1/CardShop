@@ -57,6 +57,8 @@ const cards = [
   }
 ];
 
+const stockCacheKey = "jc-pokepawns-api-stock-cache";
+
 function money(value) {
   return value.toLocaleString("en-US", {
     style: "currency",
@@ -114,25 +116,73 @@ function renderStockCards(stockCards) {
   }
 }
 
+function mapApiStockCards(apiCards) {
+  return apiCards.map((card) => ({
+    apiId: card.apiId,
+    name: card.name,
+    set: card.set,
+    market: Number(card.market),
+    image: card.image,
+    condition: card.condition,
+    cacheUntil: card.cacheUntil
+  }));
+}
+
+function cachedApiStockCards() {
+  try {
+    const cache = JSON.parse(localStorage.getItem(stockCacheKey));
+    if (!cache?.expiresAt || Date.now() >= Date.parse(cache.expiresAt) || !Array.isArray(cache.cards)) {
+      return [];
+    }
+
+    return mapApiStockCards(cache.cards);
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveApiStockCards(apiCards) {
+  const cacheUntil = apiCards
+    .map((card) => card.cacheUntil)
+    .filter(Boolean)
+    .sort()[0];
+
+  if (!cacheUntil) {
+    return;
+  }
+
+  localStorage.setItem(stockCacheKey, JSON.stringify({
+    expiresAt: cacheUntil,
+    cards: apiCards
+  }));
+}
+
 async function fetchApiStockCards() {
   if (!hasApiBackend()) {
     return [];
   }
 
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 8000);
   try {
-    const apiCards = await apiRequest("/api/stock");
-    return Array.isArray(apiCards)
-      ? apiCards.map((card) => ({
-        apiId: card.apiId,
-        name: card.name,
-        set: card.set,
-        market: Number(card.market),
-        image: card.image,
-        condition: card.condition
-      }))
-      : [];
+    const response = await fetch(`${configuredApiBaseUrl}/api/stock`, {
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      return [];
+    }
+
+    const apiCards = await response.json();
+    if (!Array.isArray(apiCards)) {
+      return [];
+    }
+
+    saveApiStockCards(apiCards);
+    return mapApiStockCards(apiCards);
   } catch (error) {
     return [];
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
@@ -143,6 +193,12 @@ async function refreshStockCards() {
 
   if (!hasApiBackend()) {
     renderStockCards(cards);
+    return;
+  }
+
+  const cachedCards = cachedApiStockCards();
+  if (cachedCards.length) {
+    renderStockCards(cachedCards);
     return;
   }
 

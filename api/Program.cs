@@ -45,7 +45,10 @@ builder.Services.AddCors(options =>
 builder.Services.AddSingleton<PasswordHasher<AppUser>>();
 builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<EmailSender>();
-builder.Services.AddHttpClient<StockPriceService>();
+builder.Services.AddHttpClient<StockPriceService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(8);
+});
 builder.Services.AddHttpContextAccessor();
 
 var app = builder.Build();
@@ -500,7 +503,8 @@ namespace CardShop.Api
         decimal ShopPrice,
         string Image,
         string Condition,
-        DateOnly PriceDate);
+        DateOnly PriceDate,
+        DateTimeOffset CacheUntil);
 
     public sealed class StockPriceService(HttpClient httpClient)
     {
@@ -520,8 +524,8 @@ namespace CardShop.Api
 
         public async Task<IReadOnlyList<StockCardResponse>> GetStockAsync()
         {
-            var today = TodayInShopTime();
-            if (_cachedStock is not null && _cachedDate == today)
+            var priceDate = CurrentPriceDate();
+            if (_cachedStock is not null && _cachedDate == priceDate)
             {
                 return _cachedStock;
             }
@@ -529,20 +533,21 @@ namespace CardShop.Api
             await _refreshLock.WaitAsync();
             try
             {
-                today = TodayInShopTime();
-                if (_cachedStock is not null && _cachedDate == today)
+                priceDate = CurrentPriceDate();
+                if (_cachedStock is not null && _cachedDate == priceDate)
                 {
                     return _cachedStock;
                 }
 
-                var refresh = await RefreshStockAsync(today);
+                var refresh = await RefreshStockAsync(priceDate, NextRefreshTime());
                 if (refresh.HasLivePrice)
                 {
                     _cachedStock = refresh.Cards;
-                    _cachedDate = today;
+                    _cachedDate = priceDate;
+                    return _cachedStock;
                 }
 
-                return refresh.Cards;
+                return _cachedStock ?? refresh.Cards;
             }
             finally
             {
@@ -550,18 +555,16 @@ namespace CardShop.Api
             }
         }
 
-        private async Task<StockRefreshResult> RefreshStockAsync(DateOnly priceDate)
+        private async Task<StockRefreshResult> RefreshStockAsync(DateOnly priceDate, DateTimeOffset cacheUntil)
         {
-            var cards = new List<StockCardResponse>();
-            var hasLivePrice = false;
-            foreach (var card in StockCards)
+            var cards = await Task.WhenAll(StockCards.Select(async card =>
             {
                 var apiCard = await FetchPokemonCardAsync(card.ApiId);
                 var liveMarket = ReadMarketPrice(apiCard);
                 var market = liveMarket ?? card.FallbackMarket;
-                hasLivePrice = hasLivePrice || liveMarket is not null;
                 var image = ReadString(apiCard, "images", "large") ?? card.Image;
-                cards.Add(new StockCardResponse(
+                return new StockRefreshCard(
+                    new StockCardResponse(
                     card.ApiId,
                     card.Name,
                     card.Set,
@@ -569,10 +572,14 @@ namespace CardShop.Api
                     market * 0.8m,
                     image,
                     card.Condition,
-                    priceDate));
-            }
+                        priceDate,
+                        cacheUntil),
+                    liveMarket is not null);
+            }));
 
-            return new StockRefreshResult(cards, hasLivePrice);
+            return new StockRefreshResult(
+                cards.Select(card => card.Response).ToArray(),
+                cards.Any(card => card.HasLivePrice));
         }
 
         private async Task<JsonElement?> FetchPokemonCardAsync(string apiId)
@@ -638,9 +645,28 @@ namespace CardShop.Api
             return current.GetString();
         }
 
-        private static DateOnly TodayInShopTime()
+        private static DateOnly CurrentPriceDate()
         {
-            return DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ShopTimeZone));
+            var shopNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ShopTimeZone);
+            if (shopNow.Hour < 3)
+            {
+                shopNow = shopNow.AddDays(-1);
+            }
+
+            return DateOnly.FromDateTime(shopNow);
+        }
+
+        private static DateTimeOffset NextRefreshTime()
+        {
+            var shopNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ShopTimeZone);
+            var nextRefreshLocal = new DateTime(shopNow.Year, shopNow.Month, shopNow.Day, 3, 0, 0, DateTimeKind.Unspecified);
+            if (shopNow.Hour >= 3)
+            {
+                nextRefreshLocal = nextRefreshLocal.AddDays(1);
+            }
+
+            var nextRefreshUtc = TimeZoneInfo.ConvertTimeToUtc(nextRefreshLocal, ShopTimeZone);
+            return new DateTimeOffset(nextRefreshUtc, TimeSpan.Zero);
         }
 
         private static TimeZoneInfo ResolveShopTimeZone()
@@ -664,6 +690,8 @@ namespace CardShop.Api
             string Condition);
 
         private sealed record StockRefreshResult(IReadOnlyList<StockCardResponse> Cards, bool HasLivePrice);
+
+        private sealed record StockRefreshCard(StockCardResponse Response, bool HasLivePrice);
     }
 
     public sealed class Database(IConfiguration configuration)

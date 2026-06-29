@@ -1,5 +1,5 @@
 param(
-    [string]$ResourceGroup = "CardShop",
+    [string]$ResourceGroup = "cardshop-api",
     [string]$WebAppName = "cardshop-api-cahrb7bmgubegjhb",
     [string]$ApiUrl = "https://cardshop-api-cahrb7bmgubegjhb.centralus-01.azurewebsites.net"
 )
@@ -22,6 +22,9 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
 Write-Host "Publishing API..." -ForegroundColor Cyan
 Push-Location $apiDir
 try {
+    if (Test-Path $publishDir) {
+        Remove-Item -LiteralPath $publishDir -Recurse -Force
+    }
     dotnet publish -c Release -o $publishDir
 
     Write-Host "Creating deployment zip..." -ForegroundColor Cyan

@@ -3,3 +3,5 @@ update.txt
 
 api/bin/
 api/obj/
+api/publish/
+api/publish.zip

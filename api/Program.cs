@@ -590,7 +590,9 @@ namespace CardShop.Api
             {
                 var apiCard = await FetchPokemonCardAsync(card.ApiId);
                 var liveMarket = ReadMarketPrice(apiCard);
-                var market = liveMarket ?? card.FallbackMarket ?? 0m;
+                var market = liveMarket is null
+                    ? card.FallbackMarket ?? 0m
+                    : ConditionPrice(liveMarket.Value, card.Condition);
                 var image = ReadString(apiCard, "images", "large") ?? card.Image;
                 return new StockRefreshCard(
                     new StockCardResponse(
@@ -654,6 +656,20 @@ namespace CardShop.Api
             }
 
             return null;
+        }
+
+        private static decimal ConditionPrice(decimal price, string condition)
+        {
+            var multiplier = condition.Trim().ToLowerInvariant() switch
+            {
+                "light play" or "lightly played" => 0.85m,
+                "moderately played" => 0.70m,
+                "heavily played" => 0.55m,
+                "damaged" => 0.35m,
+                _ => 1m
+            };
+
+            return Math.Round(price * multiplier, 2, MidpointRounding.AwayFromZero);
         }
 
         private static string? ReadString(JsonElement? element, params string[] path)

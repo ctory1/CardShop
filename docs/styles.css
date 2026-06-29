@@ -1189,12 +1189,11 @@ h2 {
 }
 
 .pokemon-card .condition {
-  display: block;
-  margin-left: auto;
-  margin-right: auto;
-  width: max-content;
+  display: inline-block;
+  margin-left: 0;
+  margin-right: 0;
   max-width: 100%;
-  text-align: center;
+  text-align: left;
 }
 
 .price-grid {

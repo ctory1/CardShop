@@ -84,6 +84,7 @@ function escapeHtml(value) {
 function cardTemplate(card) {
   const market = hasPrice(card.market) ? card.market : 0;
   const shopPrice = market * 0.8;
+  const quantity = Number(card.quantity) || 1;
   return `
     <div class="col-sm-6 col-lg-4">
       <article class="pokemon-card">
@@ -91,7 +92,7 @@ function cardTemplate(card) {
           <img src="${card.image}" alt="${card.name} card" loading="lazy">
         </div>
         <div class="card-body">
-          <span class="condition">${card.condition}</span>
+          <span class="condition">${card.condition}${quantity > 1 ? ` · Qty ${quantity}` : ""}</span>
           <h3>${card.name}</h3>
           <p>${card.set}</p>
           <div class="price-grid">
@@ -124,6 +125,7 @@ function mapApiStockCards(apiCards) {
     market: Number(card.market),
     image: card.image,
     condition: card.condition,
+    quantity: Number(card.quantity) || 1,
     cacheUntil: card.cacheUntil
   }));
 }
@@ -2098,7 +2100,6 @@ function resultCardTemplate(card, priceSources) {
     shopPrice,
     priceSources
   }));
-
   return `
     <article class="scanner-result">
       <img src="${escapeHtml(image)}" alt="${name} card">

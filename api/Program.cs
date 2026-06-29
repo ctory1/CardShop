@@ -61,8 +61,23 @@ app.UseCors();
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 
-app.MapGet("/api/stock", async (StockPriceService stockPriceService) =>
-    Results.Ok(await stockPriceService.GetStockAsync()));
+app.MapGet("/api/stock", async (Database db, StockPriceService stockPriceService) =>
+{
+    try
+    {
+        var editableStock = await db.GetPokemonStockCardsAsync();
+        if (editableStock.Count > 0)
+        {
+            return Results.Ok(await stockPriceService.GetStockAsync(editableStock));
+        }
+    }
+    catch (SqlException)
+    {
+        // Keep the public stock page online if the optional stock table has not been created yet.
+    }
+
+    return Results.Ok(await stockPriceService.GetDefaultStockAsync());
+});
 
 app.MapPost("/api/auth/signup", async (
     SignupRequest request,
@@ -503,29 +518,43 @@ namespace CardShop.Api
         decimal ShopPrice,
         string Image,
         string Condition,
+        int Quantity,
         DateOnly PriceDate,
         DateTimeOffset CacheUntil);
+
+    public sealed record StockCard(
+        string ApiId,
+        string Name,
+        string Set,
+        string? Number,
+        decimal? FallbackMarket,
+        string Image,
+        string Condition,
+        int Quantity);
 
     public sealed class StockPriceService(HttpClient httpClient)
     {
         private static readonly TimeZoneInfo ShopTimeZone = ResolveShopTimeZone();
         private static readonly IReadOnlyList<StockCard> StockCards = [
-            new("sv3pt5-199", "Charizard ex Special Illustration Rare", "Pokémon 151", 395m, "https://images.pokemontcg.io/sv3pt5/199_hires.png", "Near Mint"),
-            new("swsh7-215", "Umbreon VMAX Alternate Art", "Evolving Skies", 2037m, "https://images.pokemontcg.io/swsh7/215_hires.png", "Near Mint"),
-            new("swsh11-186", "Giratina V Alternate Art", "Lost Origin", 777m, "https://images.pokemontcg.io/swsh11/186_hires.png", "Near Mint"),
-            new("swsh7-218", "Rayquaza VMAX Alternate Art", "Evolving Skies", 962m, "https://images.pokemontcg.io/swsh7/218_hires.png", "Light Play"),
-            new("swsh12-186", "Lugia V Alternate Art", "Silver Tempest", 516m, "https://images.pokemontcg.io/swsh12/186_hires.png", "Near Mint"),
-            new("svp-85", "Pikachu with Grey Felt Hat", "Promo", 970m, "https://images.pokemontcg.io/svp/85_hires.png", "Near Mint")
+            new("sv3pt5-199", "Charizard ex Special Illustration Rare", "Pokémon 151", "199", 395m, "https://images.pokemontcg.io/sv3pt5/199_hires.png", "Near Mint", 1),
+            new("swsh7-215", "Umbreon VMAX Alternate Art", "Evolving Skies", "215", 2037m, "https://images.pokemontcg.io/swsh7/215_hires.png", "Near Mint", 1),
+            new("swsh11-186", "Giratina V Alternate Art", "Lost Origin", "186", 777m, "https://images.pokemontcg.io/swsh11/186_hires.png", "Near Mint", 1),
+            new("swsh7-218", "Rayquaza VMAX Alternate Art", "Evolving Skies", "218", 962m, "https://images.pokemontcg.io/swsh7/218_hires.png", "Lightly Played", 1),
+            new("swsh12-186", "Lugia V Alternate Art", "Silver Tempest", "186", 516m, "https://images.pokemontcg.io/swsh12/186_hires.png", "Near Mint", 1),
+            new("svp-85", "Pikachu with Grey Felt Hat", "Promo", "85", 970m, "https://images.pokemontcg.io/svp/85_hires.png", "Near Mint", 1)
         ];
 
         private readonly SemaphoreSlim _refreshLock = new(1, 1);
         private IReadOnlyList<StockCardResponse>? _cachedStock;
         private DateOnly? _cachedDate;
 
-        public async Task<IReadOnlyList<StockCardResponse>> GetStockAsync()
+        public Task<IReadOnlyList<StockCardResponse>> GetDefaultStockAsync() => GetStockAsync(StockCards);
+
+        public async Task<IReadOnlyList<StockCardResponse>> GetStockAsync(IReadOnlyList<StockCard> stockCards)
         {
             var priceDate = CurrentPriceDate();
-            if (_cachedStock is not null && _cachedDate == priceDate)
+            var canUseCache = ReferenceEquals(stockCards, StockCards);
+            if (canUseCache && _cachedStock is not null && _cachedDate == priceDate)
             {
                 return _cachedStock;
             }
@@ -534,20 +563,20 @@ namespace CardShop.Api
             try
             {
                 priceDate = CurrentPriceDate();
-                if (_cachedStock is not null && _cachedDate == priceDate)
+                if (canUseCache && _cachedStock is not null && _cachedDate == priceDate)
                 {
                     return _cachedStock;
                 }
 
-                var refresh = await RefreshStockAsync(priceDate, NextRefreshTime());
-                if (refresh.HasLivePrice)
+                var refresh = await RefreshStockAsync(stockCards, priceDate, NextRefreshTime());
+                if (canUseCache && refresh.HasLivePrice)
                 {
                     _cachedStock = refresh.Cards;
                     _cachedDate = priceDate;
                     return _cachedStock;
                 }
 
-                return _cachedStock ?? refresh.Cards;
+                return canUseCache ? _cachedStock ?? refresh.Cards : refresh.Cards;
             }
             finally
             {
@@ -555,13 +584,13 @@ namespace CardShop.Api
             }
         }
 
-        private async Task<StockRefreshResult> RefreshStockAsync(DateOnly priceDate, DateTimeOffset cacheUntil)
+        private async Task<StockRefreshResult> RefreshStockAsync(IReadOnlyList<StockCard> stockCards, DateOnly priceDate, DateTimeOffset cacheUntil)
         {
-            var cards = await Task.WhenAll(StockCards.Select(async card =>
+            var cards = await Task.WhenAll(stockCards.Select(async card =>
             {
                 var apiCard = await FetchPokemonCardAsync(card.ApiId);
                 var liveMarket = ReadMarketPrice(apiCard);
-                var market = liveMarket ?? card.FallbackMarket;
+                var market = liveMarket ?? card.FallbackMarket ?? 0m;
                 var image = ReadString(apiCard, "images", "large") ?? card.Image;
                 return new StockRefreshCard(
                     new StockCardResponse(
@@ -572,6 +601,7 @@ namespace CardShop.Api
                     market * 0.8m,
                     image,
                     card.Condition,
+                    Math.Max(1, card.Quantity),
                         priceDate,
                         cacheUntil),
                     liveMarket is not null);
@@ -680,14 +710,6 @@ namespace CardShop.Api
                 return TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
             }
         }
-
-        private sealed record StockCard(
-            string ApiId,
-            string Name,
-            string Set,
-            decimal FallbackMarket,
-            string Image,
-            string Condition);
 
         private sealed record StockRefreshResult(IReadOnlyList<StockCardResponse> Cards, bool HasLivePrice);
 
@@ -972,6 +994,32 @@ namespace CardShop.Api
             command.Parameters.AddWithValue("@UserId", userId);
             await command.ExecuteNonQueryAsync();
             await transaction.CommitAsync();
+        }
+
+        public async Task<IReadOnlyList<StockCard>> GetPokemonStockCardsAsync()
+        {
+            var cards = new List<StockCard>();
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync();
+            await using var command = new SqlCommand("""
+                SELECT CardApiId, CardName, CardSet, CardNumber, ImageUrl, MarketPrice, Condition, Quantity
+                FROM PokemonStock
+                ORDER BY SortOrder ASC, CreatedAt DESC;
+                """, connection);
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                cards.Add(new StockCard(
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3),
+                    reader.IsDBNull(5) ? null : reader.GetDecimal(5),
+                    reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                    reader.GetString(6),
+                    reader.GetInt32(7)));
+            }
+            return cards;
         }
 
         private static AppUser ReadUser(SqlDataReader reader) => new()

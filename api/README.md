@@ -6,7 +6,7 @@ ASP.NET Core Web API for CardShop accounts and scanned cards.
 
 1. Install the .NET 8 SDK or newer. This machine currently has runtimes but no SDK.
 2. In SSMS, open `api/sql/001-create-tables.sql` and run it against the `CardShop` database.
-   If your tables already exist, run `api/sql/002-use-central-time-defaults.sql`, `api/sql/003-password-reset-tokens.sql`, and `api/sql/004-scanned-cards.sql` too.
+   If your tables already exist, run `api/sql/002-use-central-time-defaults.sql`, `api/sql/003-password-reset-tokens.sql`, `api/sql/004-scanned-cards.sql`, and `api/sql/005-pokemon-stock.sql` too.
    New `CreatedAt` values will be saved in Central Time using SQL Server's `Central Standard Time` zone, which handles daylight saving time.
 3. From `api/`, configure the SQL Server connection string with user secrets:
 

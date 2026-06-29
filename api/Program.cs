@@ -310,9 +310,10 @@ app.Run();
 
 static IResult? ValidateSignup(SignupRequest request)
 {
-    if (string.IsNullOrWhiteSpace(request.Username) || request.Username.Trim().Length < 3)
+    var usernameError = UsernameValidationMessage(request.Username);
+    if (usernameError is not null)
     {
-        return Results.BadRequest(new { message = "Username must be at least 3 characters." });
+        return Results.BadRequest(new { message = usernameError });
     }
 
     if (!IsValidEmail(request.Email))
@@ -323,6 +324,27 @@ static IResult? ValidateSignup(SignupRequest request)
     if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 8)
     {
         return Results.BadRequest(new { message = "Password must be at least 8 characters." });
+    }
+
+    return null;
+}
+
+static string? UsernameValidationMessage(string username)
+{
+    if (string.IsNullOrWhiteSpace(username) || username.Trim().Length < 3)
+    {
+        return "Username must be at least 3 characters.";
+    }
+
+    var trimmed = username.Trim();
+    if (trimmed.Length > 50)
+    {
+        return "Username must be 50 characters or fewer.";
+    }
+
+    if (!Regex.IsMatch(trimmed, "^[A-Za-z0-9]+$"))
+    {
+        return "Username can only use letters and numbers.";
     }
 
     return null;

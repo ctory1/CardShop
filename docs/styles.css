@@ -761,6 +761,23 @@ a:hover {
   font-weight: 900;
 }
 
+.username-feedback {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1.35;
+  margin: -0.35rem 0 0.1rem;
+  min-height: 1.2rem;
+}
+
+.username-feedback.is-valid {
+  color: var(--green);
+}
+
+.username-feedback.is-invalid {
+  color: var(--red);
+}
+
 .password-field {
   position: relative;
 }

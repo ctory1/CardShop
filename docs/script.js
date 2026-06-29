@@ -129,6 +129,8 @@ const apiUserKey = "jc-pokepawns-api-user";
 const avatarBaseKey = "jc-pokepawns-avatar";
 const purchaseBaseKey = "jc-pokepawns-purchases";
 const configuredApiBaseUrl = (window.CARDSHOP_API_BASE_URL || "").replace(/\/$/, "");
+const usernameMinLength = 3;
+const usernameMaxLength = 50;
 let cachedSetCards = [];
 let cachedSetCardsName = "";
 let cachedNameCards = [];
@@ -159,6 +161,100 @@ function saveAccounts(accounts) {
 
 function isValidEmail(email) {
   return /^[^\s@]+@(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}$/.test(email);
+}
+
+function usernameValidationMessage(username) {
+  if (!username) {
+    return "";
+  }
+
+  if (username.length < usernameMinLength) {
+    return `Username must be at least ${usernameMinLength} characters.`;
+  }
+
+  if (username.length > usernameMaxLength) {
+    return `Username must be ${usernameMaxLength} characters or fewer.`;
+  }
+
+  if (!/^[A-Za-z0-9]+$/.test(username)) {
+    return "Username can only use letters and numbers.";
+  }
+
+  return "";
+}
+
+function isValidUsername(username) {
+  return !usernameValidationMessage(username);
+}
+
+function usernameLeetAlternative(username) {
+  const leetMap = {
+    "0": "o",
+    "1": "l",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t",
+    "8": "eat"
+  };
+
+  const replaced = username.replace(/[0134578]/g, (value) => leetMap[value] || value);
+  if (replaced === username || replaced.length > usernameMaxLength) {
+    return "";
+  }
+
+  return replaced;
+}
+
+function usernameSuggestionCandidates(username) {
+  const trimmed = username.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const base = trimmed.replace(/[^A-Za-z0-9]/g, "");
+  const candidates = [
+    usernameLeetAlternative(base),
+    `${base}1`,
+    `${base}23`,
+    `${base}abc`
+  ];
+
+  return [...new Set(candidates)]
+    .filter((candidate) => candidate && candidate !== trimmed)
+    .filter((candidate) => isValidUsername(candidate))
+    .slice(0, 3);
+}
+
+function renderUsernameFeedback() {
+  const input = document.querySelector("#signupUsername");
+  const feedback = document.querySelector("#signupUsernameFeedback");
+  if (!input || !feedback) {
+    return true;
+  }
+
+  const username = input.value.trim();
+  const message = usernameValidationMessage(username);
+  input.setCustomValidity(message);
+  feedback.classList.remove("is-valid", "is-invalid");
+
+  if (!username) {
+    feedback.textContent = "";
+    return true;
+  }
+
+  if (!message) {
+    feedback.textContent = `${username} is valid.`;
+    feedback.classList.add("is-valid");
+    return true;
+  }
+
+  const suggestions = usernameSuggestionCandidates(username);
+  feedback.textContent = suggestions.length
+    ? `${username} is invalid. ${message} Try ${suggestions.join(" or ")}.`
+    : `${username} is invalid. ${message}`;
+  feedback.classList.add("is-invalid");
+  return false;
 }
 
 function setEmailValidity(input) {
@@ -596,7 +692,8 @@ function injectAuthControls() {
         </div>
         <form class="auth-form" id="signupForm">
           <label for="signupUsername">Username</label>
-          <input class="form-control" id="signupUsername" name="username" type="text" minlength="3" maxlength="12" autocomplete="username" required>
+          <input class="form-control" id="signupUsername" name="username" type="text" minlength="3" maxlength="50" autocomplete="username" aria-describedby="signupUsernameFeedback" required>
+          <p class="username-feedback" id="signupUsernameFeedback" aria-live="polite"></p>
           <label for="signupEmail">Email</label>
           <input class="form-control" id="signupEmail" name="email" type="email" autocomplete="email" pattern="^[^\\s@]+@(?:[A-Za-z0-9-]+\\.)+[A-Za-z]{2,}$" title="Please enter a valid email address (needs to include a domain)." required>
           <label for="signupPassword">Password</label>
@@ -752,6 +849,9 @@ function setAuthMode(mode) {
   document.querySelector("#authMessage").textContent = isReset
     ? "Choose a new password for your account."
     : hasApiBackend() ? "Accounts are saved to the CardShop server." : "Accounts are saved in this browser for this static site.";
+  if (isSignup) {
+    renderUsernameFeedback();
+  }
   hideForgotPasswordButton();
 }
 
@@ -890,8 +990,11 @@ async function createAccount(event) {
   event.preventDefault();
   const form = new FormData(event.target);
   const username = form.get("username").trim();
-  if (username.length > 12) {
-    setAuthMessage("Username must be 12 characters or fewer.");
+  const usernameMessage = usernameValidationMessage(username);
+  renderUsernameFeedback();
+  if (usernameMessage) {
+    markDuplicateSignupField("username");
+    setAuthMessage(usernameMessage);
     return;
   }
   const email = form.get("email").trim().toLowerCase();
@@ -1286,6 +1389,9 @@ function initializeAuth() {
         ? document.querySelector("label[for=\"signupUsername\"]")
         : document.querySelector("label[for=\"signupEmail\"]");
       if (label) label.classList.remove("is-duplicate-label");
+      if (this.id === "signupUsername") {
+        renderUsernameFeedback();
+      }
     });
   });
 

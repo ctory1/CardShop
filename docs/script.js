@@ -104,7 +104,7 @@ function cardTemplate(card) {
     <div class="col-sm-6 col-lg-4">
       <article class="pokemon-card">
         <div class="card-image-wrap">
-          <a class="card-image-link" href="${escapeHtml(viewerUrl)}" target="_blank" rel="noopener" aria-label="View front and back photos for ${escapeHtml(card.name)}">
+          <a class="card-image-link" href="${escapeHtml(viewerUrl)}" rel="noopener" aria-label="View front and back photos for ${escapeHtml(card.name)}">
             <img src="${escapeHtml(card.image)}" alt="${escapeHtml(card.name)} card" loading="lazy">
           </a>
         </div>

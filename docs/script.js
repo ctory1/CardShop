@@ -98,7 +98,7 @@ function stockCardImageUrl(card) {
 function cardTemplate(card) {
   const market = hasPrice(card.market) ? card.market : 0;
   const rawShop = market * 0.8;
-  const shopPrice = market > 35 ? Math.ceil(rawShop / 5) * 5 : rawShop;
+  const shopPrice = market >= 35 ? Math.ceil(rawShop / 5) * 5 : rawShop;
   const quantity = Number(card.quantity) || 1;
   const viewerUrl = stockCardImageUrl(card);
   return `

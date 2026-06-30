@@ -612,14 +612,16 @@ namespace CardShop.Api
                     ? card.FallbackMarket ?? 0m
                     : ConditionPrice(liveMarket.Value, card.Condition);
                 var image = ReadString(apiCard, "images", "large") ?? card.Image;
-                return new StockRefreshCard(
-                    new StockCardResponse(
-                    card.ApiId,
-                    card.Name,
-                    card.Set,
-                    market,
-                    market * 0.8m,
-                    image,
+            var rawShop = market * 0.8m;
+            var shopPrice = market > 35m ? RoundUpToNearest5(rawShop) : rawShop;
+            return new StockRefreshCard(
+                new StockCardResponse(
+                card.ApiId,
+                card.Name,
+                card.Set,
+                market,
+                shopPrice,
+                image,
                     card.FrontImage,
                     card.BackImage,
                     card.Condition,
@@ -691,6 +693,9 @@ namespace CardShop.Api
 
             return Math.Round(price * multiplier, 2, MidpointRounding.AwayFromZero);
         }
+
+        private static decimal RoundUpToNearest5(decimal price) =>
+            Math.Ceiling(price / 5m) * 5m;
 
         private static string? ReadString(JsonElement? element, params string[] path)
         {

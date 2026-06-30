@@ -97,7 +97,8 @@ function stockCardImageUrl(card) {
 
 function cardTemplate(card) {
   const market = hasPrice(card.market) ? card.market : 0;
-  const shopPrice = market * 0.8;
+  const rawShop = market * 0.8;
+  const shopPrice = market > 35 ? Math.ceil(rawShop / 5) * 5 : rawShop;
   const quantity = Number(card.quantity) || 1;
   const viewerUrl = stockCardImageUrl(card);
   return `
@@ -2446,7 +2447,8 @@ async function refreshSavedCardPrice(savedCard, button) {
     }
 
     const marketPrice = automaticCardValue(currentCard);
-    const shopPrice = hasPrice(marketPrice) ? marketPrice * 0.8 : null;
+    const rawShop = marketPrice * 0.8;
+    const shopPrice = hasPrice(marketPrice) ? (marketPrice > 35 ? Math.ceil(rawShop / 5) * 5 : rawShop) : null;
 
     if (hasApiBackend()) {
       await apiRequest(`/api/cards/${savedId}/price`, {

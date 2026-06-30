@@ -178,7 +178,6 @@ function renderCardViewerPage() {
     backImage.closest(".condition-viewer-frame").innerHTML = `
       <div class="condition-viewer-missing">
         <strong>Back photo not available yet</strong>
-        <span>Add a back-condition image to stock data to show it here.</span>
       </div>`;
   }
 }

@@ -1765,6 +1765,7 @@ h2 {
 
 .profile-avatar {
   display: block;
+  margin: 0 auto;
   height: 72px;
   border-radius: 50%;
   margin-bottom: 1rem;

@@ -1406,8 +1406,7 @@ namespace CardShop.Api
                         <span style="color:#5f6b75;font-weight:700;">{WebUtility.HtmlEncode(details)}</span><br>
                         Quantity: {item.Quantity}<br>
                         Price each: {item.ShopPrice:C}<br>
-                        Subtotal: {subtotal:C}<br>
-                        <a href="{WebUtility.HtmlEncode(item.PhotoFolderUrl)}">Open saved photo folder</a>
+                        Subtotal: {subtotal:C}
                       </td>
                     </tr>
                     <tr>

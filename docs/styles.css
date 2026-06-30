@@ -1605,6 +1605,7 @@ h2 {
 .saved-card {
   grid-template-columns: 78px 1fr;
   padding: 0.8rem;
+  padding-bottom: 3rem;
   padding-right: 7.5rem;
   position: relative;
 }
@@ -1626,15 +1627,14 @@ h2 {
   line-height: 1;
   padding: 0.45rem 0.6rem;
   position: absolute;
+  bottom: 0.75rem;
   right: 0.75rem;
-  top: 2.65rem;
 }
 
 .delete-saved-card-button {
   align-items: center;
-  background: var(--white);
-  border: 1px solid rgba(216, 58, 53, 0.35);
-  border-radius: 999px;
+  background: transparent;
+  border: 0;
   color: var(--red);
   display: flex;
   font-size: 1rem;
@@ -1651,9 +1651,7 @@ h2 {
 
 .delete-saved-card-button:hover,
 .delete-saved-card-button:focus-visible {
-  background: var(--red);
-  border-color: var(--red);
-  color: var(--white);
+  color: #a12622;
   outline: none;
 }
 

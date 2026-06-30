@@ -132,6 +132,7 @@ function renderStockCards(stockCards) {
   if (featuredTarget) {
     featuredTarget.innerHTML = stockCards.slice(0, 3).map(cardTemplate).join("");
   }
+  restorePokemonScrollPosition();
 }
 
 function mapApiStockCards(apiCards) {
@@ -2619,5 +2620,23 @@ if (clearSavedCardsButton) {
   });
 }
 
+// save position x,y of when clicking on card to go back to same focus when returning to pokemon.html
+window.addEventListener("beforeunload", () => {
+  if (window.location.pathname.endsWith("pokemon.html")) {
+    sessionStorage.setItem("pokemonScrollY", window.scrollY);
+  }
+});
+
+function restorePokemonScrollPosition() {
+  if (!window.location.pathname.endsWith("pokemon.html")) {
+    return;
+  }
+  const scrollY = sessionStorage.getItem("pokemonScrollY");
+  if (scrollY !== null) {
+    requestAnimationFrame(() => {
+      window.scrollTo(0, Number(scrollY));
+    });
+  }
+}
 initializeAuth();
 renderSavedCards();

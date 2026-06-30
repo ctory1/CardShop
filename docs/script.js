@@ -58,6 +58,8 @@ const cards = [
 ];
 
 const stockCacheKey = "cardshop-collectables-api-stock-cache";
+const stockViewerKey = "cardshop-collectables-viewer-card";
+let renderedStockCards = [];
 
 function money(value) {
   return value.toLocaleString("en-US", {
@@ -81,31 +83,31 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
-function stockCardImageUrl(card) {
-  const params = new URLSearchParams({
+function stockViewerPayload(card) {
+  return {
     name: card.name || "Pokemon Card",
     set: card.set || "",
     condition: card.condition || "",
-    front: card.frontImage || card.frontImageUrl || card.conditionFrontImage || ""
-  });
-  const back = card.backImage || card.backImageUrl || card.conditionBackImage || "";
-  if (back) {
-    params.set("back", back);
-  }
-  return `card-viewer.html?${params.toString()}`;
+    front: card.frontImage || card.frontImageUrl || card.conditionFrontImage || "",
+    back: card.backImage || card.backImageUrl || card.conditionBackImage || ""
+  };
 }
 
-function cardTemplate(card) {
+function stockCardImageUrl(card, index) {
+  return `card-viewer.html?card=${encodeURIComponent(String(index))}`;
+}
+
+function cardTemplate(card, index) {
   const market = hasPrice(card.market) ? card.market : 0;
   const rawShop = market * 0.8;
   const shopPrice = market >= 35 ? Math.ceil(rawShop / 5) * 5 : rawShop;
   const quantity = Number(card.quantity) || 1;
-  const viewerUrl = stockCardImageUrl(card);
+  const viewerUrl = stockCardImageUrl(card, index);
   return `
     <div class="col-sm-6 col-lg-4">
       <article class="pokemon-card">
         <div class="card-image-wrap">
-          <a class="card-image-link" href="${escapeHtml(viewerUrl)}" rel="noopener" aria-label="View front and back photos for ${escapeHtml(card.name)}">
+          <a class="card-image-link" href="${escapeHtml(viewerUrl)}" data-viewer-index="${index}" rel="noopener" aria-label="View front and back photos for ${escapeHtml(card.name)}">
             <img src="${escapeHtml(card.image)}" alt="${escapeHtml(card.name)} card" loading="lazy">
           </a>
         </div>
@@ -124,6 +126,7 @@ function cardTemplate(card) {
 }
 
 function renderStockCards(stockCards) {
+  renderedStockCards = stockCards;
   const stockTarget = document.querySelector("#pokemonStock");
   if (stockTarget) {
     stockTarget.innerHTML = stockCards.map(cardTemplate).join("");
@@ -134,6 +137,18 @@ function renderStockCards(stockCards) {
     featuredTarget.innerHTML = stockCards.slice(0, 3).map(cardTemplate).join("");
   }
   restorePokemonScrollPosition();
+}
+
+function renderStockMessage(message) {
+  const stockTarget = document.querySelector("#pokemonStock");
+  if (stockTarget) {
+    stockTarget.innerHTML = `<div class="col-12"><p class="empty-state">${escapeHtml(message)}</p></div>`;
+  }
+
+  const featuredTarget = document.querySelector("#featuredCards");
+  if (featuredTarget) {
+    featuredTarget.innerHTML = `<div class="col-12"><p class="empty-state">${escapeHtml(message)}</p></div>`;
+  }
 }
 
 function mapApiStockCards(apiCards) {
@@ -159,11 +174,19 @@ function renderCardViewerPage() {
   }
 
   const params = new URLSearchParams(window.location.search);
-  const name = params.get("name") || "Pokemon Card";
-  const set = params.get("set") || "";
-  const condition = params.get("condition") || "";
-  const front = params.get("front") || "";
-  const back = params.get("back") || "";
+  const cardKey = params.get("card");
+  let storedCard = null;
+  try {
+    const storageKey = cardKey ? `${stockViewerKey}:${cardKey}` : stockViewerKey;
+    storedCard = JSON.parse(sessionStorage.getItem(storageKey) || "null");
+  } catch (error) {
+    storedCard = null;
+  }
+  const name = storedCard?.name || params.get("name") || "Pokemon Card";
+  const set = storedCard?.set || params.get("set") || "";
+  const condition = storedCard?.condition || params.get("condition") || "";
+  const front = storedCard?.front || params.get("front") || "";
+  const back = storedCard?.back || params.get("back") || "";
   const meta = [set, condition].filter(Boolean).join(" - ");
 
   document.title = `${name} Photos | CardShop Collectables`;
@@ -263,22 +286,38 @@ async function refreshStockCards() {
   if (cachedCards.length) {
     renderStockCards(cachedCards);
   } else {
-    renderStockCards(cards.map((card) => ({
-      ...card,
-      market: null
-    })));
+    renderStockMessage("Loading current stock...");
   }
 
   const apiCards = await fetchApiStockCards();
   if (apiCards.length) {
     renderStockCards(apiCards);
   } else if (!cachedCards.length) {
-    renderStockCards(cards);
+    renderStockMessage("No database stock is available right now.");
   }
 }
 
 const stockTarget = document.querySelector("#pokemonStock");
 const featuredTarget = document.querySelector("#featuredCards");
+
+document.addEventListener("click", (event) => {
+  const link = event.target.closest(".card-image-link[data-viewer-index]");
+  if (!link) {
+    return;
+  }
+
+  const card = renderedStockCards[Number(link.dataset.viewerIndex)];
+  if (!card) {
+    return;
+  }
+
+  try {
+    sessionStorage.setItem(`${stockViewerKey}:${link.dataset.viewerIndex}`, JSON.stringify(stockViewerPayload(card)));
+  } catch (error) {
+    event.preventDefault();
+    window.alert("Could not open the condition photos because the image data is too large for this browser session.");
+  }
+});
 
 const scannerVideo = document.querySelector("#camera");
 const startCameraButton = document.querySelector("#startCamera");

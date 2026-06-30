@@ -2179,6 +2179,10 @@ footer {
   color: var(--red);
 }
 
+.order-thanks-done {
+  margin-top: 0.8rem;
+}
+
 .purchase-photo-order {
   background: var(--white);
   border: 1px solid var(--line);

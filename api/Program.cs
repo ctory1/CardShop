@@ -376,6 +376,8 @@ app.MapPost("/api/orders/receipt", async (
             statusCode: StatusCodes.Status500InternalServerError);
     }
 
+    receipt = await SaveOrderReceiptPhotosAsync(httpRequest, receipt);
+
     var emailSent = true;
     var emailMessage = "Order receipt emails sent.";
     try
@@ -392,7 +394,141 @@ app.MapPost("/api/orders/receipt", async (
     return Results.Ok(new { message = emailMessage, emailSent });
 });
 
+app.MapGet("/api/order-photos/{orderId}", (string orderId) =>
+{
+    var safeOrderId = SafePathSegment(orderId);
+    var orderDir = Path.Combine(OrderPhotoRoot(), safeOrderId);
+    if (!Directory.Exists(orderDir))
+    {
+        return Results.NotFound("No saved photos were found for this order.");
+    }
+
+    var images = Directory.GetFiles(orderDir)
+        .Where(path => IsSupportedImageFile(path))
+        .OrderBy(Path.GetFileName)
+        .Select(path => $"""
+            <figure>
+              <img src="{WebUtility.HtmlEncode(Path.GetFileName(path))}" alt="{WebUtility.HtmlEncode(Path.GetFileNameWithoutExtension(path))}">
+              <figcaption>{WebUtility.HtmlEncode(Path.GetFileName(path))}</figcaption>
+            </figure>
+            """);
+
+    return Results.Content($$"""
+        <!doctype html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>CardShop Order Photos</title>
+          <style>
+            body { font-family: Segoe UI, Arial, sans-serif; margin: 0; padding: 24px; background: #f7f5ef; color: #15212b; }
+            h1 { margin-top: 0; }
+            .grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+            figure { background: white; border: 1px solid #d9d4c8; border-radius: 8px; margin: 0; padding: 14px; }
+            img { display: block; max-width: 100%; margin: 0 auto; }
+            figcaption { color: #5f6b75; font-weight: 800; margin-top: 10px; text-align: center; }
+          </style>
+        </head>
+        <body>
+          <h1>CardShop Order Photos</h1>
+          <p>Order {{WebUtility.HtmlEncode(safeOrderId)}}</p>
+          <div class="grid">{{string.Join("", images)}}</div>
+        </body>
+        </html>
+        """, "text/html");
+});
+
+app.MapGet("/api/order-photos/{orderId}/{fileName}", (string orderId, string fileName) =>
+{
+    var safeOrderId = SafePathSegment(orderId);
+    var safeFileName = SafePathSegment(fileName);
+    var path = Path.Combine(OrderPhotoRoot(), safeOrderId, safeFileName);
+    if (!System.IO.File.Exists(path) || !IsSupportedImageFile(path))
+    {
+        return Results.NotFound();
+    }
+
+    return Results.File(path, ImageContentType(path));
+});
+
 app.Run();
+
+static async Task<OrderReceiptRequest> SaveOrderReceiptPhotosAsync(HttpRequest request, OrderReceiptRequest order)
+{
+    var safeOrderId = SafePathSegment(order.Id);
+    var orderDir = Path.Combine(OrderPhotoRoot(), safeOrderId);
+    Directory.CreateDirectory(orderDir);
+
+    var baseUrl = $"{request.Scheme}://{request.Host}";
+    var folderUrl = $"{baseUrl}/api/order-photos/{Uri.EscapeDataString(safeOrderId)}";
+    var savedItems = new List<OrderReceiptItem>();
+
+    for (var index = 0; index < order.Items.Count; index++)
+    {
+        var item = order.Items[index];
+        var frontUrl = await SaveDataImageAsync(item.FrontImage, orderDir, folderUrl, $"front-{index + 1}");
+        var backUrl = await SaveDataImageAsync(item.BackImage, orderDir, folderUrl, $"back-{index + 1}");
+        savedItems.Add(item with
+        {
+            FrontImage = frontUrl ?? item.FrontImage,
+            BackImage = backUrl ?? item.BackImage,
+            PhotoFolderUrl = folderUrl
+        });
+    }
+
+    return order with { Items = savedItems };
+}
+
+static async Task<string?> SaveDataImageAsync(string? value, string orderDir, string folderUrl, string fileBaseName)
+{
+    if (string.IsNullOrWhiteSpace(value) || !value.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+    {
+        return null;
+    }
+
+    var commaIndex = value.IndexOf(',');
+    if (commaIndex < 0)
+    {
+        return null;
+    }
+
+    var metadata = value[..commaIndex];
+    var extension = metadata.Contains("image/png", StringComparison.OrdinalIgnoreCase) ? ".png" : ".jpg";
+    var bytes = Convert.FromBase64String(value[(commaIndex + 1)..]);
+    var fileName = $"{SafePathSegment(fileBaseName)}{extension}";
+    await System.IO.File.WriteAllBytesAsync(Path.Combine(orderDir, fileName), bytes);
+    return $"{folderUrl}/{Uri.EscapeDataString(fileName)}";
+}
+
+static string OrderPhotoRoot()
+{
+    var home = Environment.GetEnvironmentVariable("HOME");
+    return string.IsNullOrWhiteSpace(home)
+        ? Path.Combine(AppContext.BaseDirectory, "order-photos")
+        : Path.Combine(home, "data", "cardshop-order-photos");
+}
+
+static string SafePathSegment(string? value)
+{
+    var cleaned = Regex.Replace(value ?? "", "[^A-Za-z0-9_.-]", "-").Trim('-');
+    return string.IsNullOrWhiteSpace(cleaned) ? "order" : cleaned;
+}
+
+static bool IsSupportedImageFile(string path)
+{
+    var extension = Path.GetExtension(path);
+    return extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+        || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+        || extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
+        || extension.Equals(".webp", StringComparison.OrdinalIgnoreCase);
+}
+
+static string ImageContentType(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+{
+    ".png" => "image/png",
+    ".webp" => "image/webp",
+    _ => "image/jpeg"
+};
 
 static IResult? ValidateSignup(SignupRequest request)
 {
@@ -599,6 +735,7 @@ namespace CardShop.Api
         string ApiId,
         string Name,
         string Set,
+        string? Number,
         decimal Market,
         decimal ShopPrice,
         string Image,
@@ -704,6 +841,7 @@ namespace CardShop.Api
                 card.ApiId,
                 card.Name,
                 card.Set,
+                card.Number,
                 market,
                 shopPrice,
                 image,
@@ -1233,7 +1371,8 @@ namespace CardShop.Api
             await SendEmailAsync(
                 "pokepawnsupport@gmail.com",
                 $"CardShop order receipt - {order.Total:C}",
-                OrderReceiptBody(order, "New CardShop order receipt"));
+                OrderReceiptHtml(order, "New CardShop order receipt"),
+                isHtml: true);
         }
 
         public async Task SendBuyerOrderReceiptAsync(OrderReceiptRequest order)
@@ -1246,10 +1385,11 @@ namespace CardShop.Api
             await SendEmailAsync(
                 order.BuyerEmail,
                 $"Your CardShop receipt - {order.Total:C}",
-                OrderReceiptBody(order, "Thank you for your purchase:"));
+                OrderReceiptHtml(order, "Thank you for your purchase:"),
+                isHtml: true);
         }
 
-        private static string OrderReceiptBody(OrderReceiptRequest order, string heading)
+        private static string OrderReceiptHtml(OrderReceiptRequest order, string heading)
         {
             var lines = order.Items.Select(item =>
             {
@@ -1257,32 +1397,60 @@ namespace CardShop.Api
                 var details = string.Join(" - ", new[] { item.Set, item.Condition }.Where(value => !string.IsNullOrWhiteSpace(value)));
                 var subtotal = item.ShopPrice * item.Quantity;
                 return $"""
-                    {name}
-                    {details}
-                    Quantity: {item.Quantity}
-                    Price each: {item.ShopPrice:C}
-                    Subtotal: {subtotal:C}
-                    Image: {item.Image}
-                    Front photo: {item.FrontImage}
-                    Back photo: {item.BackImage}
-                    Photo folder: {item.PhotoFolderUrl}
+                    <tr>
+                      <td style="padding:12px;border-top:1px solid #d9d4c8;width:110px;vertical-align:top;">
+                        <img src="{WebUtility.HtmlEncode(item.Image)}" alt="{WebUtility.HtmlEncode(name)}" style="max-width:95px;border-radius:6px;">
+                      </td>
+                      <td style="padding:12px;border-top:1px solid #d9d4c8;vertical-align:top;">
+                        <strong style="font-size:16px;">{WebUtility.HtmlEncode(name)}</strong><br>
+                        <span style="color:#5f6b75;font-weight:700;">{WebUtility.HtmlEncode(details)}</span><br>
+                        Quantity: {item.Quantity}<br>
+                        Price each: {item.ShopPrice:C}<br>
+                        Subtotal: {subtotal:C}<br>
+                        <a href="{WebUtility.HtmlEncode(item.PhotoFolderUrl)}">Open saved photo folder</a>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td colspan="2" style="padding:0 12px 14px;border-bottom:1px solid #d9d4c8;">
+                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                          <tr>
+                            <td style="width:50%;padding-right:8px;vertical-align:top;">
+                              <div style="font-weight:800;color:#22766f;margin-bottom:6px;">Front</div>
+                              <a href="{WebUtility.HtmlEncode(item.FrontImage)}"><img src="{WebUtility.HtmlEncode(item.FrontImage)}" alt="{WebUtility.HtmlEncode(name)} front" style="max-width:100%;border-radius:6px;border:1px solid #d9d4c8;"></a>
+                            </td>
+                            <td style="width:50%;padding-left:8px;vertical-align:top;">
+                              <div style="font-weight:800;color:#22766f;margin-bottom:6px;">Back</div>
+                              <a href="{WebUtility.HtmlEncode(item.BackImage)}"><img src="{WebUtility.HtmlEncode(item.BackImage)}" alt="{WebUtility.HtmlEncode(name)} back" style="max-width:100%;border-radius:6px;border:1px solid #d9d4c8;"></a>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
                     """;
             });
 
             return $"""
-                {heading}
-
-                Order ID: {order.Id}
-                Ordered: {order.CreatedAt:yyyy-MM-dd HH:mm:ss zzz}
-                Buyer: {order.BuyerUsername ?? "Guest"}
-                Buyer email: {order.BuyerEmail ?? "Not provided"}
-                Payment method: {order.PaymentMethod ?? "Not provided"}
-                Contact/pickup note: {order.Note ?? "None"}
-
-                Items:
-                {string.Join("\n\n", lines)}
-
-                Total: {order.Total:C}
+                <!doctype html>
+                <html>
+                <body style="margin:0;padding:24px;background:#f7f5ef;font-family:Segoe UI,Arial,sans-serif;color:#15212b;">
+                  <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #d9d4c8;border-radius:8px;padding:22px;">
+                    <p style="color:#22766f;font-weight:900;text-transform:uppercase;margin:0 0 12px;">CardShop Collectables</p>
+                    <h1 style="font-size:30px;line-height:1.1;margin:0 0 18px;">{WebUtility.HtmlEncode(heading)}</h1>
+                    <p style="line-height:1.55;margin:0 0 18px;">
+                      <strong>Order ID:</strong> {WebUtility.HtmlEncode(order.Id)}<br>
+                      <strong>Ordered:</strong> {order.CreatedAt:yyyy-MM-dd HH:mm:ss zzz}<br>
+                      <strong>Buyer:</strong> {WebUtility.HtmlEncode(order.BuyerUsername ?? "Guest")}<br>
+                      <strong>Buyer email:</strong> {WebUtility.HtmlEncode(order.BuyerEmail ?? "Not provided")}<br>
+                      <strong>Payment method:</strong> {WebUtility.HtmlEncode(order.PaymentMethod ?? "Not provided")}<br>
+                      <strong>Contact/pickup note:</strong> {WebUtility.HtmlEncode(order.Note ?? "None")}
+                    </p>
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+                      {string.Join("", lines)}
+                    </table>
+                    <p style="font-size:22px;font-weight:900;color:#d83a35;text-align:right;margin:20px 0 0;">Total: {order.Total:C}</p>
+                  </div>
+                </body>
+                </html>
                 """;
         }
 
@@ -1302,7 +1470,7 @@ namespace CardShop.Api
                 """);
         }
 
-        private async Task SendEmailAsync(string toEmail, string subject, string body)
+        private async Task SendEmailAsync(string toEmail, string subject, string body, bool isHtml = false)
         {
             var host = _emailConfig["SmtpHost"];
             var fromAddress = _emailConfig["FromAddress"];
@@ -1320,7 +1488,7 @@ namespace CardShop.Api
                 From = new MailAddress(fromAddress, fromName),
                 Subject = subject,
                 Body = body,
-                IsBodyHtml = false
+                IsBodyHtml = isHtml
             };
             message.To.Add(toEmail);
 

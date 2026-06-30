@@ -99,6 +99,21 @@ function stockCardImageUrl(card, index) {
   return `card-viewer.html?card=${encodeURIComponent(String(index))}`;
 }
 
+function stockCardNumber(card) {
+  if (card.number) {
+    return String(card.number).replace(/^#/, "");
+  }
+
+  const apiId = card.apiId || "";
+  const match = apiId.match(/-([A-Za-z0-9]+)$/);
+  return match ? match[1] : "";
+}
+
+function stockCardSetLine(card) {
+  const number = stockCardNumber(card);
+  return number ? `${card.set} #${number}` : card.set;
+}
+
 function cardTemplate(card, index) {
   const market = hasPrice(card.market) ? card.market : 0;
   const rawShop = market * 0.8;
@@ -129,7 +144,7 @@ function cardTemplate(card, index) {
             </div>
           </div>
           <h3>${card.name}</h3>
-          <p>${card.set}</p>
+          <p>${escapeHtml(stockCardSetLine(card))}</p>
           <div class="price-grid">
             <span>Market</span><strong>${hasPrice(market) ? money(market) : "Checking"}</strong>
             <span>Shop Price</span><strong>${hasPrice(shopPrice) ? money(shopPrice) : "Checking"}</strong>
@@ -171,6 +186,7 @@ function mapApiStockCards(apiCards) {
     apiId: card.apiId,
     name: card.name,
     set: card.set,
+    number: card.number || card.cardNumber || card.CardNumber || "",
     market: Number(card.market),
     image: card.image,
     frontImage: card.frontImage || card.frontImageUrl || card.conditionFrontImage || "",
@@ -299,7 +315,8 @@ function addCardToCart(index) {
       key,
       apiId: card.apiId,
       name: card.name,
-      set: card.set,
+      set: stockCardSetLine(card),
+      number: stockCardNumber(card),
       condition: card.condition,
       image: card.image,
       frontImage: cardFrontImage(card),
@@ -1435,7 +1452,7 @@ function injectAuthControls() {
         <p class="order-photos-note">Your receipt includes a saved photo folder for the card front/back images.</p>
         <a class="account-menu-link order-photos-link" id="orderThanksPhotosLink" href="purchase-photos.html">View your saved front/back card photos any time.</a>
         <p class="auth-message order-email-status" id="orderThanksEmailStatus"></p>
-        <button class="btn btn-primary" id="orderThanksDone" type="button">Done</button>
+        <button class="btn btn-primary order-thanks-done" id="orderThanksDone" type="button">Done</button>
       </div>
     </div>
   `);

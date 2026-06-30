@@ -214,6 +214,19 @@ function renderCardViewerPage() {
   }
 }
 
+function stockCardWithoutConditionPhotos(card) {
+  const {
+    frontImage,
+    frontImageUrl,
+    conditionFrontImage,
+    backImage,
+    backImageUrl,
+    conditionBackImage,
+    ...lightweightCard
+  } = card;
+  return lightweightCard;
+}
+
 function cachedApiStockCards() {
   try {
     const cache = JSON.parse(localStorage.getItem(stockCacheKey));
@@ -221,7 +234,7 @@ function cachedApiStockCards() {
       return [];
     }
 
-    return mapApiStockCards(cache.cards);
+    return mapApiStockCards(cache.cards.map(stockCardWithoutConditionPhotos));
   } catch (error) {
     return [];
   }
@@ -239,7 +252,7 @@ function saveApiStockCards(apiCards) {
 
   localStorage.setItem(stockCacheKey, JSON.stringify({
     expiresAt: cacheUntil,
-    cards: apiCards
+    cards: apiCards.map(stockCardWithoutConditionPhotos)
   }));
 }
 

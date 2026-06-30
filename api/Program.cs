@@ -1437,7 +1437,7 @@ namespace CardShop.Api
                     <h1 style="font-size:30px;line-height:1.1;margin:0 0 18px;">{WebUtility.HtmlEncode(heading)}</h1>
                     <p style="line-height:1.55;margin:0 0 18px;">
                       <strong>Order ID:</strong> {WebUtility.HtmlEncode(order.Id)}<br>
-                      <strong>Ordered:</strong> {order.CreatedAt:yyyy-MM-dd HH:mm:ss zzz}<br>
+                      <strong>Ordered:</strong> {WebUtility.HtmlEncode(FormatCentralTime(order.CreatedAt))}<br>
                       <strong>Buyer:</strong> {WebUtility.HtmlEncode(order.BuyerUsername ?? "Guest")}<br>
                       <strong>Buyer email:</strong> {WebUtility.HtmlEncode(order.BuyerEmail ?? "Not provided")}<br>
                       <strong>Payment method:</strong> {WebUtility.HtmlEncode(order.PaymentMethod ?? "Not provided")}<br>
@@ -1451,6 +1451,23 @@ namespace CardShop.Api
                 </body>
                 </html>
                 """;
+        }
+
+        private static string FormatCentralTime(DateTimeOffset timestamp)
+        {
+            TimeZoneInfo centralTime;
+            try
+            {
+                centralTime = TimeZoneInfo.FindSystemTimeZoneById("Central Standard Time");
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                centralTime = TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
+            }
+
+            var localTime = TimeZoneInfo.ConvertTime(timestamp, centralTime);
+            var zoneLabel = centralTime.IsDaylightSavingTime(localTime.DateTime) ? "CDT" : "CST";
+            return $"{localTime:yyyy-MM-dd h:mm:ss tt} {zoneLabel}";
         }
 
         public async Task SendPasswordResetAsync(string toEmail, string username, string resetUrl)

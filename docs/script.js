@@ -414,7 +414,7 @@ async function sendOrderReceipt(order) {
     throw new Error("The API is not connected, so the email receipt was not sent.");
   }
 
-  await apiRequest("/api/orders/receipt", {
+  return await apiRequest("/api/orders/receipt", {
     method: "POST",
     body: JSON.stringify(order)
   });
@@ -497,8 +497,9 @@ async function placeCartOrder(event) {
     total: cartTotal(items)
   };
 
+  let receiptResponse = null;
   try {
-    await sendOrderReceipt(order);
+    receiptResponse = await sendOrderReceipt(order);
   } catch (error) {
     document.querySelector("#cartMessage").textContent = error.message || "The order could not be placed right now.";
     if (submitButton) {
@@ -535,7 +536,7 @@ async function placeCartOrder(event) {
   }
   closeCartModal();
   renderCartModal();
-  showOrderThanks(order, true);
+  showOrderThanks(order, receiptResponse?.emailSent !== false, receiptResponse?.message);
   refreshStockCards();
   renderAuthControls();
 }
@@ -954,14 +955,21 @@ async function apiRequest(path, options = {}) {
   });
 
   if (!response.ok) {
-    let message = response.status === 401 ? "Email or password is incorrect." : "Request failed.";
+    let message = response.status === 401 ? "Email or password is incorrect." : `Request failed (${response.status}).`;
     let duplicateFields = [];
     try {
-      const body = await response.json();
+      const body = await response.clone().json();
       message = body.message || message;
       duplicateFields = Array.isArray(body.duplicateFields) ? body.duplicateFields : [];
     } catch (error) {
-      // Keep the status-based message.
+      try {
+        const text = await response.text();
+        if (text) {
+          message = text.length > 180 ? `${text.slice(0, 180)}...` : text;
+        }
+      } catch (textError) {
+        // Keep the status-based message.
+      }
     }
     const requestError = new Error(message);
     requestError.duplicateFields = duplicateFields;

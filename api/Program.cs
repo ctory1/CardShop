@@ -376,6 +376,8 @@ app.MapPost("/api/orders/receipt", async (
             statusCode: StatusCodes.Status500InternalServerError);
     }
 
+    var emailSent = true;
+    var emailMessage = "Order receipt emails sent.";
     try
     {
         await emailSender.SendOrderReceiptAsync(receipt);
@@ -383,12 +385,11 @@ app.MapPost("/api/orders/receipt", async (
     }
     catch (Exception)
     {
-        return Results.Json(
-            new { message = "Order receipt email could not be sent right now." },
-            statusCode: StatusCodes.Status500InternalServerError);
+        emailSent = false;
+        emailMessage = "Order placed and stock updated, but receipt email could not be sent right now.";
     }
 
-    return Results.Ok(new { message = "Order receipt email sent." });
+    return Results.Ok(new { message = emailMessage, emailSent });
 });
 
 app.Run();

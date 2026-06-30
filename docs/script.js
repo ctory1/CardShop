@@ -2328,17 +2328,43 @@ async function renderSavedCards() {
     const refreshPayload = encodeURIComponent(JSON.stringify(card));
     return `
     <article class="saved-card">
+      <button class="delete-saved-card-button" type="button" data-card="${refreshPayload}" aria-label="Delete saved card">x</button>
       <button class="refresh-price-button" type="button" data-card="${refreshPayload}" aria-label="Refresh price">Refresh price</button>
       <img src="${escapeHtml(card.image || card.imageUrl || "")}" alt="${escapeHtml(card.name || card.cardName)} card">
       <div>
         <h3>${escapeHtml(card.name || card.cardName)}</h3>
         <p>${escapeHtml(card.set || card.cardSet || "")} ${card.number || card.cardNumber ? `#${escapeHtml(card.number || card.cardNumber)}` : ""}</p>
         <strong>${hasPrice(card.market || card.marketPrice) ? money(card.market || card.marketPrice) : "No price"}</strong>
-        <span>Shop price ${hasPrice(card.shopPrice) ? money(card.shopPrice) : "N/A"}</span>
         ${timestampHtml}
       </div>
     </article>`;
   }).join("");
+}
+
+async function deleteSavedCard(savedCard, button) {
+  const savedId = savedCard.id || savedCard.Id;
+  if (!savedId) {
+    setScannerStatus("Could not delete this card because it does not have a saved id.");
+    return;
+  }
+
+  button.disabled = true;
+
+  try {
+    if (hasApiBackend()) {
+      await apiRequest(`/api/cards/${savedId}`, { method: "DELETE" });
+    } else {
+      const cards = await getSavedCards();
+      const updatedCards = cards.filter((card) => (card.id || card.Id) !== savedId);
+      localStorage.setItem(currentSavedCardsKey(), JSON.stringify(updatedCards));
+    }
+
+    await renderSavedCards();
+    setScannerStatus("Deleted saved card.");
+  } catch (error) {
+    button.disabled = false;
+    setScannerStatus(error.message || "Could not delete this saved card.");
+  }
 }
 
 async function refreshSavedCardPrice(savedCard, button) {
@@ -2425,12 +2451,16 @@ if (lookupForm) {
 
 if (savedCardsTarget) {
   savedCardsTarget.addEventListener("click", (event) => {
-    const button = event.target.closest(".refresh-price-button");
-    if (!button) {
+    const deleteButton = event.target.closest(".delete-saved-card-button");
+    if (deleteButton) {
+      deleteSavedCard(JSON.parse(decodeURIComponent(deleteButton.dataset.card)), deleteButton);
       return;
     }
 
-    refreshSavedCardPrice(JSON.parse(decodeURIComponent(button.dataset.card)), button);
+    const refreshButton = event.target.closest(".refresh-price-button");
+    if (refreshButton) {
+      refreshSavedCardPrice(JSON.parse(decodeURIComponent(refreshButton.dataset.card)), refreshButton);
+    }
   });
 }
 

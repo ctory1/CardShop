@@ -1627,7 +1627,39 @@ h2 {
   padding: 0.45rem 0.6rem;
   position: absolute;
   right: 0.75rem;
+  top: 2.65rem;
+}
+
+.delete-saved-card-button {
+  align-items: center;
+  background: var(--white);
+  border: 1px solid rgba(216, 58, 53, 0.35);
+  border-radius: 999px;
+  color: var(--red);
+  display: flex;
+  font-size: 1rem;
+  font-weight: 900;
+  height: 1.8rem;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  position: absolute;
+  right: 0.75rem;
   top: 0.75rem;
+  width: 1.8rem;
+}
+
+.delete-saved-card-button:hover,
+.delete-saved-card-button:focus-visible {
+  background: var(--red);
+  border-color: var(--red);
+  color: var(--white);
+  outline: none;
+}
+
+.delete-saved-card-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .refresh-price-button:hover,

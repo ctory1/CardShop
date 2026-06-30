@@ -1290,7 +1290,8 @@ h2 {
   display: flex;
   gap: 0.5rem;
   justify-content: space-between;
-  margin-right: 6.7rem;
+  margin-right: 7.4rem;
+  min-height: 2.2rem;
 }
 
 .stock-count {
@@ -1298,7 +1299,10 @@ h2 {
   display: inline-block;
   font-size: 0.78rem;
   font-weight: 900;
-  padding-top: 0.35rem;
+  line-height: 1.15;
+  max-width: 4.7rem;
+  padding-top: 0.22rem;
+  text-align: right;
   white-space: nowrap;
 }
 
@@ -2176,13 +2180,12 @@ footer {
   }
 
   .stock-card-topline {
-    display: block;
     margin-right: 0;
-    padding-right: 6.7rem;
+    padding-right: 7.4rem;
   }
 
   .stock-count {
-    padding-top: 0;
+    max-width: 4.7rem;
   }
 
   .scanner-result {

@@ -259,6 +259,13 @@ let setSuggestionRequestId = 0;
 let nameSuggestionController = null;
 let setSuggestionController = null;
 let accountActionModalResolver = null;
+const conditionMultipliers = {
+  "Near Mint": 1,
+  "Lightly Played": 0.85,
+  "Moderately Played": 0.7,
+  "Heavily Played": 0.55,
+  "Damaged": 0.35
+};
 
 function setScannerStatus(message) {
   if (scannerStatus) {
@@ -1733,6 +1740,17 @@ function automaticCardValue(card) {
     0;
 }
 
+function selectedCardCondition() {
+  return lookupForm?.elements.cardCondition?.value || "Near Mint";
+}
+
+function conditionAdjustedPrice(price, condition) {
+  if (!hasPrice(price)) {
+    return 0;
+  }
+  return Math.round(Number(price) * (conditionMultipliers[condition] || 1) * 100) / 100;
+}
+
 function average(values) {
   const validValues = values.filter((value) => Number.isFinite(value) && value > 0);
   if (!validValues.length) {
@@ -2107,45 +2125,38 @@ async function identifyCapturedCard() {
   }
 }
 
-function sourceRows(sources) {
-  if (!sources.length) {
-    return "<span>Ungraded sales data</span><strong>Not available yet</strong>";
-  }
-
-  return sources.map((source) => `
-    <span>${escapeHtml(source.label)}</span><strong>${money(source.value)}</strong>
-  `).join("");
-}
-
-function resultCardTemplate(card, priceSources) {
-  const market = average(priceSources.map((source) => source.value));
-  const shopPrice = hasPrice(market) ? market * 0.8 : 0;
+function resultCardTemplate(card, priceSources, condition) {
+  const nearMintMarket = average(priceSources.map((source) => source.value));
+  const conditionMarket = conditionAdjustedPrice(nearMintMarket, condition);
   const image = card.images?.small || card.images?.large || "";
   const name = escapeHtml(card.name);
   const setName = escapeHtml(card.set?.name || "Unknown set");
   const number = escapeHtml(card.number || "");
   const rarity = escapeHtml(card.rarity || "Pokemon card");
+  const conditionText = escapeHtml(condition);
+  const conditionRow = condition === "Near Mint" ? "" : `
+          <span>${conditionText} Price</span><strong class="condition-value">${hasPrice(conditionMarket) ? money(conditionMarket) : "N/A"}</strong>`;
   const payload = encodeURIComponent(JSON.stringify({
     id: card.id,
     name: card.name,
     set: card.set?.name || "Unknown set",
     number: card.number || "",
     image,
-    market,
-    shopPrice,
+    market: nearMintMarket,
+    conditionPrice: conditionMarket,
+    condition,
     priceSources
   }));
   return `
     <article class="scanner-result">
       <img src="${escapeHtml(image)}" alt="${name} card">
       <div>
-        <span class="condition">${rarity}</span>
+        <span class="condition">${rarity} - ${conditionText}</span>
         <h3>${name}</h3>
         <p>${setName} ${number ? `#${number}` : ""}</p>
         <div class="price-grid compact">
-          ${sourceRows(priceSources)}
-          <span>Estimated Value</span><strong>${hasPrice(market) ? money(market) : "No price yet"}</strong>
-          <span>80% Price</span><strong>${hasPrice(shopPrice) ? money(shopPrice) : "N/A"}</strong>
+          <span>Ungraded Price (Near Mint)</span><strong>${hasPrice(nearMintMarket) ? money(nearMintMarket) : "No price yet"}</strong>
+${conditionRow}
         </div>
         <div class="scanner-actions result-actions">
           <button class="btn btn-primary btn-sm save-scanned-card" type="button" data-card="${payload}">Enter Card</button>
@@ -2191,12 +2202,13 @@ async function findCards(name, setText) {
       results = await fetchCards(buildFallbackCardQuery(name, setText));
     }
 
+    const condition = selectedCardCondition();
     const pricedCards = results.map(pricedCard);
     const noPriceMessage = pricedCards.some((item) => !item.sources.length)
       ? "<p class=\"scanner-status\">Some matched cards do not have ungraded sales data yet. This often happens when a card is very new or the market source has not posted sales/pricing data.</p>"
       : "";
     lookupResults.innerHTML = results.length
-      ? pricedCards.map((item) => resultCardTemplate(item.card, item.sources)).join("") + noPriceMessage
+      ? pricedCards.map((item) => resultCardTemplate(item.card, item.sources, condition)).join("") + noPriceMessage
       : "<p class=\"scanner-status\">No cards found. Try just the card name, or use the set name instead of the card number.</p>";
   } catch (error) {
     lookupResults.innerHTML = `<p class="scanner-status">${escapeHtml(error.message || "The card lookup is unavailable right now. Try again in a moment.")}</p>`;

@@ -2108,6 +2108,113 @@ footer {
   font-weight: 950;
 }
 
+.order-thanks-dialog {
+  max-width: 600px;
+  width: min(100%, 600px);
+}
+
+.order-thanks-dialog h2 {
+  font-size: clamp(1.7rem, 4vw, 2.35rem);
+  line-height: 1.08;
+  margin-bottom: 1rem;
+}
+
+.order-receipt-items {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.order-receipt-item {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: 76px minmax(0, 1fr);
+  padding: 0.8rem;
+}
+
+.order-receipt-item img {
+  width: 100%;
+}
+
+.order-receipt-item strong,
+.order-receipt-item span {
+  display: block;
+}
+
+.order-receipt-item strong {
+  font-size: 1.05rem;
+  font-weight: 950;
+  line-height: 1.18;
+}
+
+.order-receipt-item span {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+  margin-top: 0.15rem;
+}
+
+.order-thanks-total {
+  margin-top: 1rem;
+}
+
+.order-photos-note {
+  color: var(--muted);
+  font-weight: 800;
+  margin: 0 0 0.75rem;
+}
+
+.order-photos-link {
+  margin-bottom: 0.85rem;
+}
+
+.order-email-status {
+  color: var(--green);
+  font-weight: 900;
+}
+
+.order-email-status.is-warning {
+  color: var(--red);
+}
+
+.purchase-photo-order {
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 1.25rem;
+  padding: clamp(0.9rem, 2vw, 1.25rem);
+}
+
+.purchase-photo-header {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 1rem;
+  padding-bottom: 0.85rem;
+}
+
+.purchase-photo-header h2 {
+  color: var(--red);
+  margin: 0;
+}
+
+.purchase-photo-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.purchase-photo-card h3 {
+  font-size: 1.2rem;
+  font-weight: 950;
+  margin-bottom: 0.2rem;
+}
+
+.purchase-photo-card > p {
+  color: var(--muted);
+  font-weight: 800;
+  margin-bottom: 0.8rem;
+}
+
 @media (max-width: 991.98px) {
   .navbar {
     padding-bottom: 0.75rem;

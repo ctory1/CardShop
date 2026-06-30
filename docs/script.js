@@ -60,6 +60,7 @@ const cards = [
 const stockCacheKey = "cardshop-collectables-api-stock-cache";
 const stockViewerKey = "cardshop-collectables-viewer-card";
 const cartKey = "cardshop-collectables-cart";
+const purchasePhotosKey = "cardshop-collectables-purchase-photos";
 let renderedStockCards = [];
 
 function money(value) {
@@ -190,6 +191,37 @@ function shopPriceForCard(card) {
   return market >= 35 ? Math.ceil(rawShop / 5) * 5 : rawShop;
 }
 
+function cardFrontImage(card) {
+  return card.frontImage || card.frontImageUrl || card.conditionFrontImage || "";
+}
+
+function cardBackImage(card) {
+  return card.backImage || card.backImageUrl || card.conditionBackImage || "";
+}
+
+function purchasePhotosUrl(orderId = "") {
+  const url = new URL("purchase-photos.html", window.location.href);
+  if (orderId) {
+    url.searchParams.set("order", orderId);
+  }
+  return url.href;
+}
+
+function readPurchasePhotoOrders() {
+  try {
+    const orders = JSON.parse(localStorage.getItem(purchasePhotosKey));
+    return Array.isArray(orders) ? orders : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function savePurchasePhotoOrder(order) {
+  const orders = readPurchasePhotoOrders().filter((savedOrder) => savedOrder.id !== order.id);
+  orders.unshift(order);
+  localStorage.setItem(purchasePhotosKey, JSON.stringify(orders.slice(0, 20)));
+}
+
 function getCartItems() {
   try {
     const items = JSON.parse(localStorage.getItem(cartKey));
@@ -210,6 +242,21 @@ function cartItemCount() {
 
 function cartTotal(items = getCartItems()) {
   return items.reduce((sum, item) => sum + (Number(item.shopPrice) || 0) * (Number(item.quantity) || 0), 0);
+}
+
+function orderReceiptItemsMarkup(items) {
+  return items.map((item) => `
+    <article class="order-receipt-item">
+      <img src="${escapeHtml(item.image || "")}" alt="${escapeHtml(item.name)} card">
+      <div>
+        <strong>${escapeHtml(item.name)}</strong>
+        <span>${escapeHtml(item.set || "")}${item.condition ? ` - ${escapeHtml(item.condition)}` : ""}</span>
+        <span>Quantity: ${Number(item.quantity) || 1}</span>
+        <span>${money(Number(item.shopPrice) || 0)} each</span>
+        ${(item.frontImage || item.backImage) ? `<a href="${escapeHtml(purchasePhotosUrl())}">View front/back photos</a>` : ""}
+      </div>
+    </article>
+  `).join("");
 }
 
 function updateCartCount() {
@@ -255,6 +302,8 @@ function addCardToCart(index) {
       set: card.set,
       condition: card.condition,
       image: card.image,
+      frontImage: cardFrontImage(card),
+      backImage: cardBackImage(card),
       shopPrice,
       stock,
       quantity: quantityToAdd
@@ -320,11 +369,13 @@ function cartModalMarkup() {
             <option value="Apple Pay">Apple Pay</option>
             <option value="Cash">Cash at pickup</option>
           </select>
+          <label for="cartBuyerEmail">Email for receipt</label>
+          <input class="form-control" id="cartBuyerEmail" name="buyerEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${escapeHtml(getActiveUser()?.email || "")}" ${items.length ? "required" : "disabled"}>
           <label for="cartBuyerNote">Contact or pickup note</label>
-          <input class="form-control" id="cartBuyerNote" name="buyerNote" type="text" placeholder="Email, phone, or pickup time" ${items.length ? "" : "disabled"}>
+          <input class="form-control" id="cartBuyerNote" name="buyerNote" type="text" placeholder="Phone, pickup time, or extra note" ${items.length ? "" : "disabled"}>
           <button class="btn btn-primary" type="submit" ${items.length ? "" : "disabled"}>Place Order</button>
         </form>
-        <p class="auth-message" id="cartMessage">Payment collection is ready for your processor details. Orders are saved locally until Venmo/card/Apple Pay credentials are connected.</p>
+        <p class="auth-message" id="cartMessage">Place Order sends receipt copies to you and Pokepawn Support, then removes sold-out cards from stock.</p>
       </div>
     </div>
   `;
@@ -358,26 +409,104 @@ function closeCartModal() {
   }
 }
 
-function placeCartOrder(event) {
+async function sendOrderReceipt(order) {
+  if (!hasApiBackend()) {
+    throw new Error("The API is not connected, so the email receipt was not sent.");
+  }
+
+  await apiRequest("/api/orders/receipt", {
+    method: "POST",
+    body: JSON.stringify(order)
+  });
+}
+
+function showOrderThanks(order, emailSent, emailMessage = "") {
+  const modal = document.querySelector("#orderThanksModal");
+  const itemsTarget = document.querySelector("#orderThanksItems");
+  const totalTarget = document.querySelector("#orderThanksTotal");
+  const emailTarget = document.querySelector("#orderThanksEmailStatus");
+  const photosTarget = document.querySelector("#orderThanksPhotosLink");
+  if (!modal || !itemsTarget || !totalTarget || !emailTarget || !photosTarget) {
+    return;
+  }
+
+  itemsTarget.innerHTML = orderReceiptItemsMarkup(order.items);
+  totalTarget.textContent = money(order.total);
+  emailTarget.textContent = emailSent
+    ? "Receipt copies were emailed to you and Pokepawn Support."
+    : emailMessage || "The order was saved here, but the email receipt could not be sent.";
+  emailTarget.classList.toggle("is-warning", !emailSent);
+  photosTarget.href = purchasePhotosUrl(order.id);
+  photosTarget.textContent = "View your saved front/back card photos any time.";
+  modal.hidden = false;
+}
+
+function hideOrderThanks() {
+  const modal = document.querySelector("#orderThanksModal");
+  if (modal) {
+    modal.hidden = true;
+  }
+}
+
+async function placeCartOrder(event) {
   event.preventDefault();
   const items = getCartItems();
-  const message = document.querySelector("#cartMessage");
+  const submitButton = event.target.querySelector("button[type=\"submit\"]");
   if (!items.length) {
     return;
+  }
+
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Placing Order...";
   }
 
   const form = new FormData(event.target);
   const method = form.get("paymentMethod");
   const note = form.get("buyerNote") || "";
+  const buyerEmail = String(form.get("buyerEmail") || "").trim().toLowerCase();
+  if (!isValidEmail(buyerEmail)) {
+    document.querySelector("#cartMessage").textContent = "Enter a valid email address so we can send your receipt.";
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = "Place Order";
+    }
+    return;
+  }
   const user = getActiveUser();
   const order = {
     id: randomId(),
     createdAt: new Date().toISOString(),
     paymentMethod: method,
     note,
-    items,
+    buyerUsername: user?.username || "",
+    buyerEmail,
+    items: items.map((item) => ({
+      ...item,
+      apiId: item.apiId || "",
+      name: item.name,
+      set: item.set,
+      condition: item.condition,
+      image: item.image,
+      frontImage: item.frontImage || "",
+      backImage: item.backImage || "",
+      shopPrice: Number(item.shopPrice) || 0,
+      quantity: Number(item.quantity) || 1,
+      photoFolderUrl: purchasePhotosUrl()
+    })),
     total: cartTotal(items)
   };
+
+  try {
+    await sendOrderReceipt(order);
+  } catch (error) {
+    document.querySelector("#cartMessage").textContent = error.message || "The order could not be placed right now.";
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = "Place Order";
+    }
+    return;
+  }
 
   if (user) {
     const purchases = getAccountPurchases(user);
@@ -391,12 +520,23 @@ function placeCartOrder(event) {
   }
 
   localStorage.setItem("cardshop-collectables-last-order", JSON.stringify(order));
+  savePurchasePhotoOrder(order);
+  localStorage.removeItem(stockCacheKey);
   saveCartItems([]);
-  renderCartModal();
-  const refreshedMessage = document.querySelector("#cartMessage") || message;
-  if (refreshedMessage) {
-    refreshedMessage.textContent = `Order placed for ${money(order.total)} with ${method}. Connect your real payment account to charge automatically.`;
+  if (renderedStockCards.length) {
+    const purchasedQuantities = new Map(order.items.map((item) => [item.apiId, Number(item.quantity) || 0]));
+    renderedStockCards = renderedStockCards
+      .map((card) => {
+        const purchasedQuantity = purchasedQuantities.get(card.apiId) || 0;
+        return purchasedQuantity ? { ...card, quantity: Math.max(0, (Number(card.quantity) || 0) - purchasedQuantity) } : card;
+      })
+      .filter((card) => (Number(card.quantity) || 0) > 0);
+    renderStockCards(renderedStockCards);
   }
+  closeCartModal();
+  renderCartModal();
+  showOrderThanks(order, true);
+  refreshStockCards();
   renderAuthControls();
 }
 
@@ -446,6 +586,57 @@ function renderCardViewerPage() {
         <strong>Back photo not available yet</strong>
       </div>`;
   }
+}
+
+function renderPurchasePhotosPage() {
+  const target = document.querySelector("#purchasePhotoOrders");
+  if (!target) {
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const orderId = params.get("order");
+  const orders = readPurchasePhotoOrders();
+  const visibleOrders = orderId ? orders.filter((order) => order.id === orderId) : orders;
+
+  if (!visibleOrders.length) {
+    target.innerHTML = `<p class="empty-state">No saved purchase photos are available in this browser yet.</p>`;
+    return;
+  }
+
+  target.innerHTML = visibleOrders.map((order) => `
+    <section class="purchase-photo-order">
+      <div class="viewer-header purchase-photo-header">
+        <div>
+          <p class="eyebrow dark">Order ${escapeHtml(order.id)}</p>
+          <h2>${money(Number(order.total) || 0)}</h2>
+        </div>
+        <p>${escapeHtml(new Date(order.createdAt).toLocaleString())}</p>
+      </div>
+      <div class="purchase-photo-grid">
+        ${order.items.map((item) => `
+          <article class="purchase-photo-card">
+            <h3>${escapeHtml(item.name)}</h3>
+            <p>${escapeHtml(item.set || "")}${item.condition ? ` - ${escapeHtml(item.condition)}` : ""} - Qty ${Number(item.quantity) || 1}</p>
+            <div class="condition-viewer-grid">
+              <div class="condition-viewer-panel">
+                <h2>FRONT</h2>
+                <div class="condition-viewer-frame">
+                  ${item.frontImage ? `<img src="${escapeHtml(item.frontImage)}" alt="${escapeHtml(item.name)} front">` : `<div class="condition-viewer-missing"><strong>Front photo not available</strong></div>`}
+                </div>
+              </div>
+              <div class="condition-viewer-panel">
+                <h2>BACK</h2>
+                <div class="condition-viewer-frame">
+                  ${item.backImage ? `<img src="${escapeHtml(item.backImage)}" alt="${escapeHtml(item.name)} back">` : `<div class="condition-viewer-missing"><strong>Back photo not available</strong></div>`}
+                </div>
+              </div>
+            </div>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `).join("");
 }
 
 function stockCardWithoutConditionPhotos(card) {
@@ -596,6 +787,7 @@ if (stockTarget || featuredTarget) {
   refreshStockCards();
 }
 renderCardViewerPage();
+renderPurchasePhotosPage();
 const usernameMinLength = 3;
 const usernameMaxLength = 50;
 let cachedSetCards = [];
@@ -931,6 +1123,7 @@ function accountSummaryMarkup(user, summary, isLoading = false) {
     </dl>
     <div class="account-menu-actions">
       <a class="account-menu-link" href="scanner.html" role="menuitem">View saved cards</a>
+      <a class="account-menu-link" href="purchase-photos.html" role="menuitem">Purchase photos</a>
       <a class="account-menu-link" href="loyaltyprogram.html" role="menuitem">Rewards details</a>
       <button class="account-menu-link danger" id="deleteAccountButton" type="button" role="menuitem">Delete Account</button>
       <button class="account-menu-link danger" id="logoutButton" type="button" role="menuitem">Logout</button>
@@ -1216,6 +1409,25 @@ function injectAuthControls() {
         <h2 id="signupThanksTitle">Welcome to CardShop Collectables!</h2>
         <p class="signup-thanks-message" id="signupThanksMessage"></p>
         <a class="btn btn-primary" href="loyaltyprogram.html">View Loyalty Program</a>
+      </div>
+    </div>
+  `);
+
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="auth-modal" id="orderThanksModal" hidden>
+      <div class="auth-dialog order-thanks-dialog" role="dialog" aria-modal="true" aria-labelledby="orderThanksTitle">
+        <button class="auth-close" id="orderThanksClose" type="button" aria-label="Close order thank you">&times;</button>
+        <p class="eyebrow dark">Order Placed</p>
+        <h2 id="orderThanksTitle">Thank you for your purchase:</h2>
+        <div class="order-receipt-items" id="orderThanksItems"></div>
+        <div class="cart-total-row order-thanks-total">
+          <span>Total</span>
+          <strong id="orderThanksTotal">$0</strong>
+        </div>
+        <p class="order-photos-note">Your receipt includes a saved photo folder for the card front/back images.</p>
+        <a class="account-menu-link order-photos-link" id="orderThanksPhotosLink" href="purchase-photos.html">View your saved front/back card photos any time.</a>
+        <p class="auth-message order-email-status" id="orderThanksEmailStatus"></p>
+        <button class="btn btn-primary" id="orderThanksDone" type="button">Done</button>
       </div>
     </div>
   `);
@@ -1814,6 +2026,9 @@ function initializeAuth() {
     }
     if (event.target.closest("#signupThanksClose")) {
       hideSignupThanks();
+    }
+    if (event.target.closest("#orderThanksClose") || event.target.closest("#orderThanksDone")) {
+      hideOrderThanks();
     }
     if (event.target.closest("#showSignup")) {
       setAuthMode("signup");

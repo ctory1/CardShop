@@ -329,6 +329,68 @@ app.MapDelete("/api/cards/{id:int}", async (HttpRequest request, int id, Databas
     return Results.NoContent();
 });
 
+app.MapPost("/api/orders/receipt", async (
+    HttpRequest httpRequest,
+    OrderReceiptRequest order,
+    Database db,
+    EmailSender emailSender) =>
+{
+    if (!emailSender.IsConfigured)
+    {
+        return Results.Json(
+            new { message = "Order receipt email is not configured on the server." },
+            statusCode: StatusCodes.Status500InternalServerError);
+    }
+
+    if (order.Items is null || order.Items.Count == 0)
+    {
+        return Results.BadRequest(new { message = "At least one order item is required." });
+    }
+
+    var user = await GetAuthenticatedUser(httpRequest, db);
+    var total = order.Items.Sum(item => Math.Max(0, item.ShopPrice) * Math.Max(0, item.Quantity));
+    var receipt = order with
+    {
+        BuyerUsername = string.IsNullOrWhiteSpace(order.BuyerUsername) ? user?.Username : order.BuyerUsername,
+        BuyerEmail = string.IsNullOrWhiteSpace(order.BuyerEmail) ? user?.Email : order.BuyerEmail,
+        Total = total
+    };
+
+    if (string.IsNullOrWhiteSpace(receipt.BuyerEmail) || !IsValidEmail(receipt.BuyerEmail))
+    {
+        return Results.BadRequest(new { message = "A valid buyer email is required for the purchase receipt." });
+    }
+
+    try
+    {
+        var stockUpdated = await db.TryApplyPokemonStockPurchaseAsync(receipt.Items);
+        if (!stockUpdated)
+        {
+            return Results.Conflict(new { message = "One or more cards are no longer available in the requested quantity." });
+        }
+    }
+    catch (SqlException)
+    {
+        return Results.Json(
+            new { message = "Stock tracking is not ready on the server." },
+            statusCode: StatusCodes.Status500InternalServerError);
+    }
+
+    try
+    {
+        await emailSender.SendOrderReceiptAsync(receipt);
+        await emailSender.SendBuyerOrderReceiptAsync(receipt);
+    }
+    catch (Exception)
+    {
+        return Results.Json(
+            new { message = "Order receipt email could not be sent right now." },
+            statusCode: StatusCodes.Status500InternalServerError);
+    }
+
+    return Results.Ok(new { message = "Order receipt email sent." });
+});
+
 app.Run();
 
 static IResult? ValidateSignup(SignupRequest request)
@@ -498,6 +560,28 @@ namespace CardShop.Api
         decimal? ShopPrice);
 
     public sealed record UpdateCardPriceRequest(decimal? MarketPrice, decimal? ShopPrice);
+
+    public sealed record OrderReceiptItem(
+        string? ApiId,
+        string Name,
+        string? Set,
+        string? Condition,
+        string? Image,
+        string? FrontImage,
+        string? BackImage,
+        string? PhotoFolderUrl,
+        decimal ShopPrice,
+        int Quantity);
+
+    public sealed record OrderReceiptRequest(
+        string Id,
+        DateTimeOffset CreatedAt,
+        string? PaymentMethod,
+        string? Note,
+        string? BuyerUsername,
+        string? BuyerEmail,
+        decimal Total,
+        IReadOnlyList<OrderReceiptItem> Items);
 
     public sealed record SavedCardResponse(
         int Id,
@@ -1055,6 +1139,7 @@ namespace CardShop.Api
                            Condition,
                            Quantity
                     FROM PokemonStock
+                    WHERE Quantity > 0
                     ORDER BY SortOrder ASC, CreatedAt DESC;';
                 EXEC sys.sp_executesql @sql;
                 """, connection);
@@ -1074,6 +1159,40 @@ namespace CardShop.Api
                     reader.GetInt32(9)));
             }
             return cards;
+        }
+
+        public async Task<bool> TryApplyPokemonStockPurchaseAsync(IReadOnlyList<OrderReceiptItem> items)
+        {
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+
+            foreach (var item in items)
+            {
+                if (string.IsNullOrWhiteSpace(item.ApiId) || item.Quantity <= 0)
+                {
+                    await transaction.RollbackAsync();
+                    return false;
+                }
+
+                await using var command = new SqlCommand("""
+                    UPDATE PokemonStock
+                    SET Quantity = Quantity - @Quantity
+                    WHERE CardApiId = @CardApiId
+                      AND Quantity >= @Quantity;
+                    """, connection, (SqlTransaction)transaction);
+                command.Parameters.AddWithValue("@CardApiId", item.ApiId);
+                command.Parameters.AddWithValue("@Quantity", item.Quantity);
+                var updated = await command.ExecuteNonQueryAsync();
+                if (updated != 1)
+                {
+                    await transaction.RollbackAsync();
+                    return false;
+                }
+            }
+
+            await transaction.CommitAsync();
+            return true;
         }
 
         private static AppUser ReadUser(SqlDataReader reader) => new()
@@ -1108,7 +1227,81 @@ namespace CardShop.Api
 
         public string? ResetUrlBase => _emailConfig["ResetUrlBase"];
 
+        public async Task SendOrderReceiptAsync(OrderReceiptRequest order)
+        {
+            await SendEmailAsync(
+                "pokepawnsupport@gmail.com",
+                $"CardShop order receipt - {order.Total:C}",
+                OrderReceiptBody(order, "New CardShop order receipt"));
+        }
+
+        public async Task SendBuyerOrderReceiptAsync(OrderReceiptRequest order)
+        {
+            if (string.IsNullOrWhiteSpace(order.BuyerEmail))
+            {
+                return;
+            }
+
+            await SendEmailAsync(
+                order.BuyerEmail,
+                $"Your CardShop receipt - {order.Total:C}",
+                OrderReceiptBody(order, "Thank you for your purchase:"));
+        }
+
+        private static string OrderReceiptBody(OrderReceiptRequest order, string heading)
+        {
+            var lines = order.Items.Select(item =>
+            {
+                var name = string.IsNullOrWhiteSpace(item.Name) ? "Pokemon card" : item.Name;
+                var details = string.Join(" - ", new[] { item.Set, item.Condition }.Where(value => !string.IsNullOrWhiteSpace(value)));
+                var subtotal = item.ShopPrice * item.Quantity;
+                return $"""
+                    {name}
+                    {details}
+                    Quantity: {item.Quantity}
+                    Price each: {item.ShopPrice:C}
+                    Subtotal: {subtotal:C}
+                    Image: {item.Image}
+                    Front photo: {item.FrontImage}
+                    Back photo: {item.BackImage}
+                    Photo folder: {item.PhotoFolderUrl}
+                    """;
+            });
+
+            return $"""
+                {heading}
+
+                Order ID: {order.Id}
+                Ordered: {order.CreatedAt:yyyy-MM-dd HH:mm:ss zzz}
+                Buyer: {order.BuyerUsername ?? "Guest"}
+                Buyer email: {order.BuyerEmail ?? "Not provided"}
+                Payment method: {order.PaymentMethod ?? "Not provided"}
+                Contact/pickup note: {order.Note ?? "None"}
+
+                Items:
+                {string.Join("\n\n", lines)}
+
+                Total: {order.Total:C}
+                """;
+        }
+
         public async Task SendPasswordResetAsync(string toEmail, string username, string resetUrl)
+        {
+            await SendEmailAsync(
+                toEmail,
+                "Reset your CardShop Collectables password",
+                $"""
+                Hi {username},
+
+                Click the link below to reset your password. This link expires in 1 hour.
+
+                {resetUrl}
+
+                If you did not ask to reset your password, you can ignore this email.
+                """);
+        }
+
+        private async Task SendEmailAsync(string toEmail, string subject, string body)
         {
             var host = _emailConfig["SmtpHost"];
             var fromAddress = _emailConfig["FromAddress"];
@@ -1124,16 +1317,8 @@ namespace CardShop.Api
             using var message = new MailMessage
             {
                 From = new MailAddress(fromAddress, fromName),
-                Subject = "Reset your CardShop Collectables password",
-                Body = $"""
-                    Hi {username},
-
-                    Click the link below to reset your password. This link expires in 1 hour.
-
-                    {resetUrl}
-
-                    If you did not ask to reset your password, you can ignore this email.
-                    """,
+                Subject = subject,
+                Body = body,
                 IsBodyHtml = false
             };
             message.To.Add(toEmail);

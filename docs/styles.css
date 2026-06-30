@@ -71,15 +71,14 @@ a:hover {
 
 .navbar-collapse {
   flex-grow: 1;
-  position: relative;
 }
 
 .navbar-nav {
   justify-content: center;
   margin-left: 0 !important;
+  margin-right: 0 !important;
   gap: 0.35rem;
   padding-right: 0;
-  transform: translateX(-5.5rem);
   width: 100%;
 }
 
@@ -139,8 +138,6 @@ a:hover {
   align-items: center;
   display: flex;
   margin-left: 0;
-  position: absolute;
-  right: -3.75rem;
 }
 
 .auth-controls {
@@ -224,6 +221,22 @@ a:hover {
   top: calc(100% + 0.85rem);
   white-space: normal;
   z-index: 1100;
+}
+
+@media (min-width: 992px) {
+  .navbar-expand-lg .navbar-collapse {
+    column-gap: 1.5rem;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .navbar-expand-lg .navbar-nav {
+    justify-self: stretch;
+  }
+
+  .navbar-expand-lg .auth-nav-item {
+    justify-self: end;
+  }
 }
 
 .account-menu::before {
@@ -1634,7 +1647,7 @@ footer {
   padding: 1.2rem 0;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 991.98px) {
   .navbar {
     padding-bottom: 0.75rem;
     padding-top: 0.75rem;

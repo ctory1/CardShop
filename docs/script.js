@@ -791,10 +791,10 @@ function injectAuthControls() {
     return;
   }
 
-  nav.insertAdjacentHTML("beforeend", `
-    <li class="nav-item auth-nav-item">
+  nav.insertAdjacentHTML("afterend", `
+    <div class="auth-nav-item">
       <div class="auth-controls" id="authControls"></div>
-    </li>
+    </div>
   `);
 
   document.body.insertAdjacentHTML("beforeend", `

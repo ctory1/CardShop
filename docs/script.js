@@ -86,7 +86,7 @@ function stockCardImageUrl(card) {
     name: card.name || "Pokemon Card",
     set: card.set || "",
     condition: card.condition || "",
-    front: card.frontImage || card.frontImageUrl || card.conditionFrontImage || card.image || ""
+    front: card.frontImage || card.frontImageUrl || card.conditionFrontImage || ""
   });
   const back = card.backImage || card.backImageUrl || card.conditionBackImage || "";
   if (back) {
@@ -142,7 +142,7 @@ function mapApiStockCards(apiCards) {
     set: card.set,
     market: Number(card.market),
     image: card.image,
-    frontImage: card.frontImage || card.frontImageUrl || card.conditionFrontImage || card.image,
+    frontImage: card.frontImage || card.frontImageUrl || card.conditionFrontImage || "",
     backImage: card.backImage || card.backImageUrl || card.conditionBackImage || "",
     condition: card.condition,
     quantity: Number(card.quantity) || 1,
@@ -169,8 +169,15 @@ function renderCardViewerPage() {
   document.querySelector("#viewerCardName").textContent = name;
   document.querySelector("#viewerCardMeta").textContent = meta;
 
-  frontImage.src = front;
-  frontImage.alt = `${name} front`;
+  if (front) {
+    frontImage.src = front;
+    frontImage.alt = `${name} front`;
+  } else {
+    frontImage.closest(".condition-viewer-frame").innerHTML = `
+      <div class="condition-viewer-missing">
+        <strong>Front photo not available yet</strong>
+      </div>`;
+  }
 
   if (back) {
     backImage.src = back;
@@ -2620,23 +2627,31 @@ if (clearSavedCardsButton) {
   });
 }
 
-// save position x,y of when clicking on card to go back to same focus when returning to pokemon.html
-window.addEventListener("beforeunload", () => {
-  if (window.location.pathname.endsWith("pokemon.html")) {
+// Save scroll position when clicking a card image link and prevent browser
+// scroll restoration so coming back from card-viewer.html doesn't auto-scroll.
+document.addEventListener("click", (event) => {
+  const link = event.target.closest(".card-image-link");
+  if (link) {
     sessionStorage.setItem("pokemonScrollY", window.scrollY);
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual';
+    }
   }
 });
 
 function restorePokemonScrollPosition() {
-  if (!window.location.pathname.endsWith("pokemon.html")) {
-    return;
-  }
   const scrollY = sessionStorage.getItem("pokemonScrollY");
   if (scrollY !== null) {
-    requestAnimationFrame(() => {
-      window.scrollTo(0, Number(scrollY));
-    });
+    sessionStorage.removeItem("pokemonScrollY");
+    window.scrollTo(0, Number(scrollY));
+  }
+  // Re-enable browser scroll restoration so the change only affects this back-nav.
+  if ('scrollRestoration' in history) {
+    setTimeout(() => {
+      history.scrollRestoration = 'auto';
+    }, 0);
   }
 }
+
 initializeAuth();
 renderSavedCards();

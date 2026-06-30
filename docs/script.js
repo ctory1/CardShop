@@ -59,6 +59,7 @@ const cards = [
 
 const stockCacheKey = "cardshop-collectables-api-stock-cache";
 const stockViewerKey = "cardshop-collectables-viewer-card";
+const cartKey = "cardshop-collectables-cart";
 let renderedStockCards = [];
 
 function money(value) {
@@ -103,6 +104,7 @@ function cardTemplate(card, index) {
   const shopPrice = market >= 35 ? Math.ceil(rawShop / 5) * 5 : rawShop;
   const quantity = Number(card.quantity) || 1;
   const viewerUrl = stockCardImageUrl(card, index);
+  const canBuy = quantity > 0 && hasPrice(shopPrice);
   return `
     <div class="col-sm-6 col-lg-4">
       <article class="pokemon-card">
@@ -112,7 +114,17 @@ function cardTemplate(card, index) {
           </a>
         </div>
         <div class="card-body">
-          <span class="condition">${card.condition}${quantity > 1 ? ` · Qty ${quantity}` : ""}</span>
+          <div class="stock-card-topline">
+            <span class="condition">${escapeHtml(card.condition)}</span>
+            <span class="stock-count">${quantity} in stock</span>
+          </div>
+          <div class="stock-buy-panel">
+            <label for="stockQty${index}">Qty</label>
+            <select id="stockQty${index}" class="stock-quantity" data-stock-quantity="${index}" ${canBuy ? "" : "disabled"}>
+              ${Array.from({ length: Math.max(quantity, 1) }, (_, value) => `<option value="${value + 1}">${value + 1}</option>`).join("")}
+            </select>
+            <button class="btn btn-primary btn-sm buy-card-button" type="button" data-buy-card="${index}" ${canBuy ? "" : "disabled"}>${canBuy ? "Buy" : "Sold"}</button>
+          </div>
           <h3>${card.name}</h3>
           <p>${card.set}</p>
           <div class="price-grid">
@@ -164,6 +176,226 @@ function mapApiStockCards(apiCards) {
     quantity: Number(card.quantity) || 1,
     cacheUntil: card.cacheUntil
   }));
+}
+
+function stockCardKey(card) {
+  return card.apiId || `${card.name}-${card.set}-${card.condition}`;
+}
+
+function shopPriceForCard(card) {
+  const market = hasPrice(Number(card.market)) ? Number(card.market) : 0;
+  const rawShop = market * 0.8;
+  return market >= 35 ? Math.ceil(rawShop / 5) * 5 : rawShop;
+}
+
+function getCartItems() {
+  try {
+    const items = JSON.parse(localStorage.getItem(cartKey));
+    return Array.isArray(items) ? items : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveCartItems(items) {
+  localStorage.setItem(cartKey, JSON.stringify(items));
+  updateCartCount();
+}
+
+function cartItemCount() {
+  return getCartItems().reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+}
+
+function cartTotal(items = getCartItems()) {
+  return items.reduce((sum, item) => sum + (Number(item.shopPrice) || 0) * (Number(item.quantity) || 0), 0);
+}
+
+function updateCartCount() {
+  document.querySelectorAll("[data-cart-count]").forEach((target) => {
+    target.textContent = String(cartItemCount());
+  });
+}
+
+function addCardToCart(index) {
+  const card = renderedStockCards[Number(index)];
+  if (!card) {
+    return;
+  }
+
+  const stock = Number(card.quantity) || 1;
+  const quantityInput = document.querySelector(`[data-stock-quantity="${index}"]`);
+  const requestedQuantity = Math.max(1, Number(quantityInput?.value) || 1);
+  const key = stockCardKey(card);
+  const items = getCartItems();
+  const existing = items.find((item) => item.key === key);
+  const currentQuantity = Number(existing?.quantity) || 0;
+  const availableToAdd = Math.max(0, stock - currentQuantity);
+  const quantityToAdd = Math.min(requestedQuantity, availableToAdd);
+
+  if (!quantityToAdd) {
+    window.alert("That card is already in your cart at the available stock quantity.");
+    return;
+  }
+
+  const shopPrice = shopPriceForCard(card);
+  if (!hasPrice(shopPrice)) {
+    window.alert("This card price is still being checked.");
+    return;
+  }
+
+  if (existing) {
+    existing.quantity += quantityToAdd;
+  } else {
+    items.push({
+      key,
+      apiId: card.apiId,
+      name: card.name,
+      set: card.set,
+      condition: card.condition,
+      image: card.image,
+      shopPrice,
+      stock,
+      quantity: quantityToAdd
+    });
+  }
+
+  saveCartItems(items);
+  renderCartModal();
+  openCartModal();
+}
+
+function removeCartItem(key) {
+  saveCartItems(getCartItems().filter((item) => item.key !== key));
+  renderCartModal();
+}
+
+function updateCartItemQuantity(key, quantity) {
+  const items = getCartItems();
+  const item = items.find((cartItem) => cartItem.key === key);
+  if (item) {
+    item.quantity = Math.min(Math.max(1, Number(quantity) || 1), Number(item.stock) || 1);
+  }
+  saveCartItems(items);
+  renderCartModal();
+}
+
+function cartModalMarkup() {
+  const items = getCartItems();
+  const itemMarkup = items.length ? items.map((item) => `
+    <article class="cart-item">
+      <img src="${escapeHtml(item.image || "")}" alt="${escapeHtml(item.name)} card">
+      <div>
+        <strong>${escapeHtml(item.name)}</strong>
+        <span>${escapeHtml(item.set || "")} · ${escapeHtml(item.condition || "")}</span>
+        <span>${money(Number(item.shopPrice) || 0)} each · ${Number(item.stock) || 1} in stock</span>
+      </div>
+      <label>
+        Qty
+        <select class="cart-quantity" data-cart-quantity="${escapeHtml(item.key)}">
+          ${Array.from({ length: Math.max(Number(item.stock) || 1, 1) }, (_, value) => `<option value="${value + 1}" ${Number(item.quantity) === value + 1 ? "selected" : ""}>${value + 1}</option>`).join("")}
+        </select>
+      </label>
+      <button class="cart-remove" type="button" data-cart-remove="${escapeHtml(item.key)}" aria-label="Remove ${escapeHtml(item.name)} from cart">x</button>
+    </article>
+  `).join("") : `<p class="cart-empty">Your cart is empty.</p>`;
+
+  return `
+    <div class="auth-modal cart-modal" id="cartModal" hidden>
+      <div class="auth-dialog cart-dialog" role="dialog" aria-modal="true" aria-labelledby="cartTitle">
+        <button class="auth-close" id="cartClose" type="button" aria-label="Close cart">&times;</button>
+        <p class="eyebrow dark">Checkout</p>
+        <h2 id="cartTitle">Your Cart</h2>
+        <div class="cart-items" id="cartItems">${itemMarkup}</div>
+        <div class="cart-total-row">
+          <span>Total</span>
+          <strong>${money(cartTotal(items))}</strong>
+        </div>
+        <form class="auth-form cart-payment-form" id="cartPaymentForm">
+          <label for="cartPaymentMethod">Payment method</label>
+          <select class="form-control" id="cartPaymentMethod" name="paymentMethod" ${items.length ? "" : "disabled"}>
+            <option value="Venmo">Venmo</option>
+            <option value="Card">Card</option>
+            <option value="Apple Pay">Apple Pay</option>
+            <option value="Cash">Cash at pickup</option>
+          </select>
+          <label for="cartBuyerNote">Contact or pickup note</label>
+          <input class="form-control" id="cartBuyerNote" name="buyerNote" type="text" placeholder="Email, phone, or pickup time" ${items.length ? "" : "disabled"}>
+          <button class="btn btn-primary" type="submit" ${items.length ? "" : "disabled"}>Place Order</button>
+        </form>
+        <p class="auth-message" id="cartMessage">Payment collection is ready for your processor details. Orders are saved locally until Venmo/card/Apple Pay credentials are connected.</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderCartModal() {
+  const existingModal = document.querySelector("#cartModal");
+  if (!existingModal) {
+    document.body.insertAdjacentHTML("beforeend", cartModalMarkup());
+    return;
+  }
+  const wasOpen = !existingModal.hidden;
+  existingModal.outerHTML = cartModalMarkup();
+  if (wasOpen) {
+    document.querySelector("#cartModal").hidden = false;
+  }
+}
+
+function openCartModal() {
+  renderCartModal();
+  const modal = document.querySelector("#cartModal");
+  if (modal) {
+    modal.hidden = false;
+  }
+}
+
+function closeCartModal() {
+  const modal = document.querySelector("#cartModal");
+  if (modal) {
+    modal.hidden = true;
+  }
+}
+
+function placeCartOrder(event) {
+  event.preventDefault();
+  const items = getCartItems();
+  const message = document.querySelector("#cartMessage");
+  if (!items.length) {
+    return;
+  }
+
+  const form = new FormData(event.target);
+  const method = form.get("paymentMethod");
+  const note = form.get("buyerNote") || "";
+  const user = getActiveUser();
+  const order = {
+    id: randomId(),
+    createdAt: new Date().toISOString(),
+    paymentMethod: method,
+    note,
+    items,
+    total: cartTotal(items)
+  };
+
+  if (user) {
+    const purchases = getAccountPurchases(user);
+    purchases.unshift({
+      amount: order.total,
+      total: order.total,
+      createdAt: order.createdAt,
+      paymentMethod: method
+    });
+    localStorage.setItem(purchasesKeyForUser(user), JSON.stringify(purchases));
+  }
+
+  localStorage.setItem("cardshop-collectables-last-order", JSON.stringify(order));
+  saveCartItems([]);
+  renderCartModal();
+  const refreshedMessage = document.querySelector("#cartMessage") || message;
+  if (refreshedMessage) {
+    refreshedMessage.textContent = `Order placed for ${money(order.total)} with ${method}. Connect your real payment account to charge automatically.`;
+  }
+  renderAuthControls();
 }
 
 function renderCardViewerPage() {
@@ -1203,9 +1435,14 @@ function renderAuthControls() {
     return;
   }
 
+  const cartButton = `
+    <button class="cart-nav-button" id="openCart" type="button" aria-label="Open cart">
+      <span class="cart-icon" aria-hidden="true"></span>
+      <span class="cart-count" data-cart-count>${cartItemCount()}</span>
+    </button>`;
   const user = getActiveUser();
   if (!user) {
-    authControls.innerHTML = `<button class="auth-link" id="openLogin" type="button">Login</button><button class="btn btn-primary btn-sm" id="openSignup" type="button">Sign Up</button>`;
+    authControls.innerHTML = `<button class="auth-link" id="openLogin" type="button">Login</button><button class="btn btn-primary btn-sm" id="openSignup" type="button">Sign Up</button>${cartButton}`;
     return;
   }
 
@@ -1223,6 +1460,7 @@ function renderAuthControls() {
         ${accountSummaryMarkup(user, accountRewardSummary(user, []), true)}
       </div>
     </div>
+    ${cartButton}
   `;
 }
 
@@ -1513,9 +1751,28 @@ function openPasswordResetFromUrl() {
 function initializeAuth() {
   injectAuthControls();
   highlightCurrentNavLink();
+  renderCartModal();
   renderAuthControls();
 
   document.addEventListener("click", (event) => {
+    const buyButton = event.target.closest("[data-buy-card]");
+    if (buyButton) {
+      addCardToCart(buyButton.dataset.buyCard);
+      return;
+    }
+    if (event.target.closest("#openCart")) {
+      openCartModal();
+      return;
+    }
+    if (event.target.closest("#cartClose")) {
+      closeCartModal();
+      return;
+    }
+    const removeCartButton = event.target.closest("[data-cart-remove]");
+    if (removeCartButton) {
+      removeCartItem(removeCartButton.dataset.cartRemove);
+      return;
+    }
     if (event.target.closest("#accountActionConfirm")) {
       closeAccountActionModal(true);
       return;
@@ -1577,12 +1834,20 @@ function initializeAuth() {
   });
 
   document.addEventListener("change", (event) => {
+    if (event.target.matches("[data-cart-quantity]")) {
+      updateCartItemQuantity(event.target.dataset.cartQuantity, event.target.value);
+      return;
+    }
     if (event.target.matches("#accountAvatarFile")) {
       setAvatarFromFile(event.target);
     }
   });
 
   document.addEventListener("submit", (event) => {
+    if (event.target.matches("#cartPaymentForm")) {
+      placeCartOrder(event);
+      return;
+    }
     if (event.target.matches("#accountAvatarUrlForm")) {
       setAvatarFromUrl(event);
     }

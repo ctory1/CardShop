@@ -1426,6 +1426,35 @@ h2 {
   position: relative;
 }
 
+.autocomplete-field .form-control {
+  padding-right: 3rem;
+}
+
+.autocomplete-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  display: flex;
+  font: inherit;
+  font-size: 1rem;
+  height: calc(100% - 2px);
+  justify-content: center;
+  min-height: 0;
+  padding: 0;
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  width: 2.7rem;
+  z-index: 2;
+}
+
+.autocomplete-toggle:hover,
+.autocomplete-toggle:focus-visible {
+  color: var(--ink);
+  outline: none;
+}
+
 .autocomplete-menu {
   background: var(--white);
   border: 1px solid var(--line);
@@ -1459,6 +1488,7 @@ h2 {
   min-height: 2.75rem;
   padding: 0.6rem 0.8rem;
   text-align: left;
+  width: 100%;
 }
 
 .autocomplete-option:last-child {

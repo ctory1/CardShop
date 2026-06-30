@@ -232,6 +232,8 @@ const savedCardsTarget = document.querySelector("#savedCards");
 const clearSavedCardsButton = document.querySelector("#clearSavedCards");
 const cardNameInput = document.querySelector("#cardName");
 const cardSetInput = document.querySelector("#cardSet");
+const cardNameToggle = document.querySelector("#cardNameToggle");
+const cardSetToggle = document.querySelector("#cardSetToggle");
 const cardNameSuggestions = document.querySelector("#cardNameSuggestions");
 const cardSetSuggestions = document.querySelector("#cardSetSuggestions");
 const savedCardsBaseKey = "cardshop-collectables-scanned-cards";
@@ -1740,25 +1742,37 @@ function average(values) {
 }
 
 function buildCardQuery(name, setText) {
-  const cleanName = name.trim().replace(/"/g, "");
-  const cleanSet = setText.trim().replace(/"/g, "");
-  const terms = [`name:"${cleanName}"`];
+  const cleanName = wildcardQueryText(name);
+  const cleanSet = wildcardQueryText(setText);
+  const compactSet = cardNumberSearchText(cleanSet);
+  const terms = [apiNameQuery(cleanName)];
   const numberParts = cardNumberParts(cleanSet);
 
   if (numberParts) {
     terms.push(`number:${numberParts.number}`);
     terms.push(`set.printedTotal:${numberParts.total}`);
   } else if (cleanSet) {
-    terms.push(`(set.name:"${cleanSet}" OR set.series:"${cleanSet}")`);
+    const setTerms = [`set.name:"${cleanSet}"`, `set.series:"${cleanSet}"`];
+    if (isLikelyCardNumberText(cleanSet)) {
+      setTerms.unshift(`number:${compactSet}`);
+    }
+    terms.push(`(${setTerms.join(" OR ")})`);
   }
 
   return terms.join(" ");
 }
 
 function buildFallbackCardQuery(name, setText) {
-  const cleanName = name.trim().replace(/"/g, "");
+  const cleanName = wildcardQueryText(name);
+  const cleanSet = wildcardQueryText(setText);
   const numberParts = cardNumberParts(setText);
-  return numberParts ? `name:"${cleanName}" number:${numberParts.number}` : `name:"${cleanName}"`;
+  if (numberParts) {
+    return `${apiNameQuery(cleanName)} number:${numberParts.number}`;
+  }
+  if (isLikelyCardNumberText(cleanSet)) {
+    return `${apiNameQuery(cleanName)} number:${cardNumberSearchText(cleanSet)}`;
+  }
+  return apiNameQuery(cleanName);
 }
 
 function debounce(callback, delay) {
@@ -1828,6 +1842,19 @@ function apiWildcardText(text) {
   return wildcardQueryText(text).replace(/\s+/g, "*");
 }
 
+function apiNameQuery(name) {
+  return `name:${apiWildcardText(name)}*`;
+}
+
+function cardNumberSearchText(text) {
+  return wildcardQueryText(text).replace(/\s+/g, "");
+}
+
+function isLikelyCardNumberText(text) {
+  const cleanText = cardNumberSearchText(text);
+  return /^[A-Za-z]{1,8}\d+[A-Za-z0-9-]*$/i.test(cleanText) || /^\d+[A-Za-z0-9-]*$/i.test(cleanText);
+}
+
 function startsWithIgnoreCase(value, prefix) {
   return value.toLowerCase().startsWith(prefix.toLowerCase());
 }
@@ -1841,8 +1868,16 @@ function cardSetName(card) {
   return card.set?.name || "Unknown set";
 }
 
+function cardSuggestionDetail(card) {
+  return [
+    cardDisplayNumber(card) ? `#${cardDisplayNumber(card)}` : "",
+    cardSetName(card),
+    card.rarity || ""
+  ].filter(Boolean).join(" - ");
+}
+
 function cardNameMatchesInput(card, text) {
-  return startsWithIgnoreCase(card.name, text);
+  return card.name.toLowerCase().includes(text.toLowerCase());
 }
 
 function cardMatchesSetInput(card, setText) {
@@ -1856,10 +1891,10 @@ function cardMatchesSetInput(card, setText) {
 function cardNameOptionsFromCards(cards, text) {
   return uniqueBy(
     cards.filter((card) => cardNameMatchesInput(card, text)),
-    (card) => `${card.name.toLowerCase()}-${cardSetName(card).toLowerCase()}`
+    (card) => `${card.name.toLowerCase()}-${card.set?.id || cardSetName(card)}-${card.number || ""}-${card.id || ""}`
   ).map((card) => ({
     value: card.name,
-    label: cardSetName(card),
+    label: cardSuggestionDetail(card),
     card
   }));
 }
@@ -1882,7 +1917,7 @@ function cardSetOptionsFromCards(cards, setText) {
     (card) => `${card.set?.id || cardSetName(card)}-${cardDisplayNumber(card)}`
   ).map((card) => ({
     value: cardDisplayNumber(card),
-    label: cardSetName(card),
+    label: cardSuggestionDetail(card),
     card
   }));
 
@@ -1943,12 +1978,13 @@ async function updateCardNameSuggestions() {
     orderBy: "name",
     timeoutMs: 2500
   });
-  if (!results.length) {
-    results = await fetchCardSuggestions(`name:*${apiWildcardText(text)}*`, 40, {
+  if (results.length < 12) {
+    const broadResults = await fetchCardSuggestions(`name:*${apiWildcardText(text)}*`, 40, {
       controller: nameSuggestionController,
       orderBy: "name",
       timeoutMs: 2500
     });
+    results = uniqueBy([...results, ...broadResults], (card) => card.id || `${card.name}-${card.set?.id}-${card.number}`);
   }
 
   if (requestId !== nameSuggestionRequestId || text !== wildcardQueryText(cardNameInput?.value || "")) {
@@ -2139,6 +2175,9 @@ async function findCards(name, setText) {
     lookupResults.innerHTML = "<p class=\"scanner-status\">Enter or scan a card name first.</p>";
     return;
   }
+
+  hideAllSuggestions();
+  document.activeElement?.blur();
 
   if (submitButton) {
     submitButton.disabled = true;
@@ -2387,23 +2426,54 @@ if (cardNameInput) {
   cardNameInput.addEventListener("input", () => {
     cachedSetCardsName = "";
     cachedSetCards = [];
-    updateCardNameSuggestions();
-    renderDatalist(cardSetSuggestions, []);
+    hideSuggestions(cardNameSuggestions);
+    hideSuggestions(cardSetSuggestions);
   });
-  cardNameInput.addEventListener("change", () => {
-    cachedSetCardsName = "";
-    cachedSetCards = [];
-    updateCardSetSuggestions();
-  });
-  cardNameInput.addEventListener("focus", () => {
-    updateCardNameSuggestions();
+  cardNameInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    hideAllSuggestions();
+    cardSetInput?.focus();
   });
 }
 
 if (cardSetInput) {
-  cardSetInput.addEventListener("input", updateCardSetSuggestions);
-  cardSetInput.addEventListener("focus", () => {
-    updateCardSetSuggestions();
+  cardSetInput.addEventListener("input", () => {
+    hideSuggestions(cardSetSuggestions);
+  });
+  cardSetInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    hideAllSuggestions();
+    cardSetInput.blur();
+    lookupForm?.requestSubmit();
+  });
+}
+
+if (cardNameToggle) {
+  cardNameToggle.addEventListener("click", async () => {
+    if (!cardNameSuggestions?.hidden) {
+      hideSuggestions(cardNameSuggestions);
+      return;
+    }
+    hideSuggestions(cardSetSuggestions);
+    await updateCardNameSuggestions();
+  });
+}
+
+if (cardSetToggle) {
+  cardSetToggle.addEventListener("click", async () => {
+    if (!cardSetSuggestions?.hidden) {
+      hideSuggestions(cardSetSuggestions);
+      return;
+    }
+    hideSuggestions(cardNameSuggestions);
+    cachedSetCardsName = "";
+    await updateCardSetSuggestions();
   });
 }
 
@@ -2422,8 +2492,6 @@ document.addEventListener("click", (event) => {
       cachedSetCardsName = cardNameInput.value;
       cachedSetCards = card ? [card] : [];
       hideSuggestions(cardNameSuggestions);
-      updateCardSetSuggestions();
-      refreshSetCardsForSelectedName(cardNameInput.value);
       cardSetInput.focus();
       return;
     }

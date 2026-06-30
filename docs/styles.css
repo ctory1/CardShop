@@ -1177,11 +1177,56 @@ h2 {
   place-items: center;
   background: linear-gradient(145deg, #203545, #f4d76b);
   padding: 1.2rem;
+  position: relative;
 }
 
 .card-image-wrap img {
   width: min(78%, 245px);
   filter: drop-shadow(0 20px 22px rgba(0, 0, 0, 0.35));
+  transition: filter 0.2s ease, transform 0.2s ease;
+}
+
+.card-image-link {
+  align-items: center;
+  display: grid;
+  justify-items: center;
+  position: relative;
+  text-decoration: none;
+  width: 100%;
+}
+
+.card-image-link::after {
+  background: rgba(16, 24, 32, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  bottom: 0.5rem;
+  color: var(--white);
+  content: "View front/back";
+  font-size: 0.8rem;
+  font-weight: 900;
+  opacity: 0;
+  padding: 0.4rem 0.7rem;
+  pointer-events: none;
+  position: absolute;
+  transform: translateY(0.4rem);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.card-image-link:hover img,
+.card-image-link:focus-visible img {
+  filter: drop-shadow(0 24px 28px rgba(0, 0, 0, 0.45)) brightness(1.08);
+  transform: translateY(-4px) scale(1.02);
+}
+
+.card-image-link:hover::after,
+.card-image-link:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.card-image-link:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 6px;
 }
 
 .pokemon-card .card-body {
@@ -1438,7 +1483,7 @@ h2 {
 
 .condition-picker legend {
   color: var(--muted);
-  font-size: 1rem;
+  font-size: 1.25rem;
   font-weight: 900;
   margin-bottom: 0.1rem;
   width: 100%;
@@ -1746,6 +1791,109 @@ footer {
   padding: 1.2rem 0;
 }
 
+.card-viewer-page {
+  background: #f6f3eb;
+}
+
+.viewer-shell {
+  min-height: calc(100vh - 5rem);
+  padding: clamp(1rem, 3vw, 2rem);
+}
+
+.viewer-back-link {
+  color: var(--green);
+  display: inline-flex;
+  font-weight: 900;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+  text-decoration: none;
+}
+
+.viewer-back-link:hover,
+.viewer-back-link:focus-visible {
+  color: var(--red);
+}
+
+.viewer-header {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.viewer-header h1 {
+  font-size: clamp(1.7rem, 4vw, 3rem);
+  font-weight: 900;
+  margin: 0;
+}
+
+.viewer-header p {
+  color: var(--muted);
+  font-weight: 800;
+  margin: 0;
+}
+
+.condition-viewer-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.condition-viewer-panel {
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 70vh;
+  padding: clamp(0.8rem, 2vw, 1.25rem);
+}
+
+.condition-viewer-panel h2 {
+  color: var(--green);
+  font-size: 1rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  margin-bottom: 0.75rem;
+  text-align: center;
+}
+
+.condition-viewer-frame {
+  align-items: center;
+  background: linear-gradient(145deg, #203545, #f4d76b);
+  border-radius: 8px;
+  display: grid;
+  min-height: calc(70vh - 4rem);
+  padding: 1rem;
+}
+
+.condition-viewer-frame img {
+  filter: drop-shadow(0 20px 24px rgba(0, 0, 0, 0.35));
+  margin: auto;
+  max-height: calc(70vh - 6rem);
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.condition-viewer-missing {
+  color: var(--white);
+  display: grid;
+  gap: 0.35rem;
+  justify-items: center;
+  margin: auto;
+  max-width: 24rem;
+  text-align: center;
+}
+
+.condition-viewer-missing strong {
+  font-size: 1.1rem;
+}
+
+.condition-viewer-missing span {
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 700;
+}
+
 @media (max-width: 991.98px) {
   .navbar {
     padding-bottom: 0.75rem;
@@ -1824,5 +1972,14 @@ footer {
 
   .scanner-result {
     grid-template-columns: 92px 1fr;
+  }
+
+  .condition-viewer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .condition-viewer-panel,
+  .condition-viewer-frame {
+    min-height: auto;
   }
 }

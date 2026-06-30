@@ -81,15 +81,32 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
+function stockCardImageUrl(card) {
+  const params = new URLSearchParams({
+    name: card.name || "Pokemon Card",
+    set: card.set || "",
+    condition: card.condition || "",
+    front: card.frontImage || card.frontImageUrl || card.conditionFrontImage || card.image || ""
+  });
+  const back = card.backImage || card.backImageUrl || card.conditionBackImage || "";
+  if (back) {
+    params.set("back", back);
+  }
+  return `card-viewer.html?${params.toString()}`;
+}
+
 function cardTemplate(card) {
   const market = hasPrice(card.market) ? card.market : 0;
   const shopPrice = market * 0.8;
   const quantity = Number(card.quantity) || 1;
+  const viewerUrl = stockCardImageUrl(card);
   return `
     <div class="col-sm-6 col-lg-4">
       <article class="pokemon-card">
         <div class="card-image-wrap">
-          <img src="${card.image}" alt="${card.name} card" loading="lazy">
+          <a class="card-image-link" href="${escapeHtml(viewerUrl)}" target="_blank" rel="noopener" aria-label="View front and back photos for ${escapeHtml(card.name)}">
+            <img src="${escapeHtml(card.image)}" alt="${escapeHtml(card.name)} card" loading="lazy">
+          </a>
         </div>
         <div class="card-body">
           <span class="condition">${card.condition}${quantity > 1 ? ` · Qty ${quantity}` : ""}</span>
@@ -124,10 +141,46 @@ function mapApiStockCards(apiCards) {
     set: card.set,
     market: Number(card.market),
     image: card.image,
+    frontImage: card.frontImage || card.frontImageUrl || card.conditionFrontImage || card.image,
+    backImage: card.backImage || card.backImageUrl || card.conditionBackImage || "",
     condition: card.condition,
     quantity: Number(card.quantity) || 1,
     cacheUntil: card.cacheUntil
   }));
+}
+
+function renderCardViewerPage() {
+  const frontImage = document.querySelector("#viewerFrontImage");
+  const backImage = document.querySelector("#viewerBackImage");
+  if (!frontImage || !backImage) {
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const name = params.get("name") || "Pokemon Card";
+  const set = params.get("set") || "";
+  const condition = params.get("condition") || "";
+  const front = params.get("front") || "";
+  const back = params.get("back") || "";
+  const meta = [set, condition].filter(Boolean).join(" - ");
+
+  document.title = `${name} Photos | CardShop Collectables`;
+  document.querySelector("#viewerCardName").textContent = name;
+  document.querySelector("#viewerCardMeta").textContent = meta;
+
+  frontImage.src = front;
+  frontImage.alt = `${name} front`;
+
+  if (back) {
+    backImage.src = back;
+    backImage.alt = `${name} back`;
+  } else {
+    backImage.closest(".condition-viewer-frame").innerHTML = `
+      <div class="condition-viewer-missing">
+        <strong>Back photo not available yet</strong>
+        <span>Add a back-condition image to stock data to show it here.</span>
+      </div>`;
+  }
 }
 
 function cachedApiStockCards() {
@@ -248,6 +301,7 @@ const configuredApiBaseUrl = (window.CARDSHOP_API_BASE_URL || "").replace(/\/$/,
 if (stockTarget || featuredTarget) {
   refreshStockCards();
 }
+renderCardViewerPage();
 const usernameMinLength = 3;
 const usernameMaxLength = 50;
 let cachedSetCards = [];

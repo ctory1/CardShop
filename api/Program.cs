@@ -517,6 +517,8 @@ namespace CardShop.Api
         decimal Market,
         decimal ShopPrice,
         string Image,
+        string? FrontImage,
+        string? BackImage,
         string Condition,
         int Quantity,
         DateOnly PriceDate,
@@ -529,8 +531,24 @@ namespace CardShop.Api
         string? Number,
         decimal? FallbackMarket,
         string Image,
+        string? FrontImage,
+        string? BackImage,
         string Condition,
-        int Quantity);
+        int Quantity)
+    {
+        public StockCard(
+            string ApiId,
+            string Name,
+            string Set,
+            string? Number,
+            decimal? FallbackMarket,
+            string Image,
+            string Condition,
+            int Quantity)
+            : this(ApiId, Name, Set, Number, FallbackMarket, Image, null, null, Condition, Quantity)
+        {
+        }
+    }
 
     public sealed class StockPriceService(HttpClient httpClient)
     {
@@ -602,6 +620,8 @@ namespace CardShop.Api
                     market,
                     market * 0.8m,
                     image,
+                    card.FrontImage,
+                    card.BackImage,
                     card.Condition,
                     Math.Max(1, card.Quantity),
                         priceDate,
@@ -1018,9 +1038,20 @@ namespace CardShop.Api
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
             await using var command = new SqlCommand("""
-                SELECT CardApiId, CardName, CardSet, CardNumber, ImageUrl, MarketPrice, Condition, Quantity
-                FROM PokemonStock
-                ORDER BY SortOrder ASC, CreatedAt DESC;
+                DECLARE @sql NVARCHAR(MAX) = N'
+                    SELECT CardApiId,
+                           CardName,
+                           CardSet,
+                           CardNumber,
+                           ImageUrl,
+                           ' + CASE WHEN COL_LENGTH('dbo.PokemonStock', 'FrontImageUrl') IS NULL THEN N'CAST(NULL AS NVARCHAR(MAX))' ELSE N'FrontImageUrl' END + N' AS FrontImageUrl,
+                           ' + CASE WHEN COL_LENGTH('dbo.PokemonStock', 'BackImageUrl') IS NULL THEN N'CAST(NULL AS NVARCHAR(MAX))' ELSE N'BackImageUrl' END + N' AS BackImageUrl,
+                           MarketPrice,
+                           Condition,
+                           Quantity
+                    FROM PokemonStock
+                    ORDER BY SortOrder ASC, CreatedAt DESC;';
+                EXEC sys.sp_executesql @sql;
                 """, connection);
             await using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
@@ -1030,10 +1061,12 @@ namespace CardShop.Api
                     reader.GetString(1),
                     reader.GetString(2),
                     reader.IsDBNull(3) ? null : reader.GetString(3),
-                    reader.IsDBNull(5) ? null : reader.GetDecimal(5),
+                    reader.IsDBNull(7) ? null : reader.GetDecimal(7),
                     reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
-                    reader.GetString(6),
-                    reader.GetInt32(7)));
+                    reader.IsDBNull(5) ? null : reader.GetString(5),
+                    reader.IsDBNull(6) ? null : reader.GetString(6),
+                    reader.GetString(8),
+                    reader.GetInt32(9)));
             }
             return cards;
         }

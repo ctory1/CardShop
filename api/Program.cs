@@ -1081,12 +1081,12 @@ namespace CardShop.Api
 
             var port = int.TryParse(_emailConfig["SmtpPort"], out var configuredPort) ? configuredPort : 587;
             var enableSsl = !bool.TryParse(_emailConfig["EnableSsl"], out var configuredSsl) || configuredSsl;
-            var fromName = string.IsNullOrWhiteSpace(_emailConfig["FromName"]) ? "J&C PokePawns" : _emailConfig["FromName"];
+            var fromName = string.IsNullOrWhiteSpace(_emailConfig["FromName"]) ? "CardShop Collectables" : _emailConfig["FromName"];
 
             using var message = new MailMessage
             {
                 From = new MailAddress(fromAddress, fromName),
-                Subject = "Reset your J&C PokePawns password",
+                Subject = "Reset your CardShop Collectables password",
                 Body = $"""
                     Hi {username},
 

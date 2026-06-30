@@ -57,7 +57,7 @@ const cards = [
   }
 ];
 
-const stockCacheKey = "jc-pokepawns-api-stock-cache";
+const stockCacheKey = "cardshop-collectables-api-stock-cache";
 
 function money(value) {
   return value.toLocaleString("en-US", {
@@ -97,7 +97,7 @@ function cardTemplate(card) {
           <p>${card.set}</p>
           <div class="price-grid">
             <span>Market</span><strong>${hasPrice(market) ? money(market) : "Checking"}</strong>
-            <span>Our Price</span><strong>${hasPrice(shopPrice) ? money(shopPrice) : "Checking"}</strong>
+            <span>Shop Price</span><strong>${hasPrice(shopPrice) ? money(shopPrice) : "Checking"}</strong>
           </div>
         </div>
       </article>
@@ -234,14 +234,14 @@ const cardNameInput = document.querySelector("#cardName");
 const cardSetInput = document.querySelector("#cardSet");
 const cardNameSuggestions = document.querySelector("#cardNameSuggestions");
 const cardSetSuggestions = document.querySelector("#cardSetSuggestions");
-const savedCardsBaseKey = "jc-pokepawns-scanned-cards";
-const accountsKey = "jc-pokepawns-accounts";
-const sessionKey = "jc-pokepawns-session";
-const localPasswordResetKey = "jc-pokepawns-password-reset";
-const apiTokenKey = "jc-pokepawns-api-token";
-const apiUserKey = "jc-pokepawns-api-user";
-const avatarBaseKey = "jc-pokepawns-avatar";
-const purchaseBaseKey = "jc-pokepawns-purchases";
+const savedCardsBaseKey = "cardshop-collectables-scanned-cards";
+const accountsKey = "cardshop-collectables-accounts";
+const sessionKey = "cardshop-collectables-session";
+const localPasswordResetKey = "cardshop-collectables-password-reset";
+const apiTokenKey = "cardshop-collectables-api-token";
+const apiUserKey = "cardshop-collectables-api-user";
+const avatarBaseKey = "cardshop-collectables-avatar";
+const purchaseBaseKey = "cardshop-collectables-purchases";
 const configuredApiBaseUrl = (window.CARDSHOP_API_BASE_URL || "").replace(/\/$/, "");
 if (stockTarget || featuredTarget) {
   refreshStockCards();
@@ -562,7 +562,7 @@ function accountSummaryMarkup(user, summary, isLoading = false) {
       <div class="account-progress-track" aria-label="Reward progress to the next $5 credit">
         <span style="width: ${Math.min(progressLabel, 100)}%"></span>
       </div>
-      <p>${summary.purchaseSpend > 0 ? `${money(summary.nextRewardRemaining)} in eligible purchases until your next $5 reward.` : "No eligible purchases recorded yet. Selling cards to us does not count toward rewards."}</p>
+      <p>${summary.purchaseSpend > 0 ? `${money(summary.nextRewardRemaining)} in eligible purchases until your next $5 reward.` : "No eligible purchases recorded yet. Card sales to the shop do not count toward rewards."}</p>
     </div>
     <div class="account-stat-grid">
       <span>Saved cards<strong>${isLoading ? "-" : summary.cardCount}</strong></span>
@@ -856,7 +856,7 @@ function injectAuthControls() {
       <div class="auth-dialog signup-thanks-dialog" role="dialog" aria-modal="true" aria-labelledby="signupThanksTitle">
         <button class="auth-close" id="signupThanksClose" type="button" aria-label="Close signup thank you">&times;</button>
         <p class="eyebrow dark">Account Created</p>
-        <h2 id="signupThanksTitle">Welcome to J&amp;C Pok&eacute;Pawns!</h2>
+        <h2 id="signupThanksTitle">Welcome to CardShop Collectables!</h2>
         <p class="signup-thanks-message" id="signupThanksMessage"></p>
         <a class="btn btn-primary" href="loyaltyprogram.html">View Loyalty Program</a>
       </div>
@@ -902,7 +902,7 @@ function showSignupThanks(username) {
     return;
   }
 
-  message.innerHTML = `Thank you, <span class="signup-thanks-name">${escapeHtml(username)}</span> for signing up! If you have any questions about how our loyalty program works, click the button below!`;
+  message.innerHTML = `Thank you, <span class="signup-thanks-name">${escapeHtml(username)}</span> for signing up! If you have any questions about how the loyalty program works, click the button below!`;
   modal.hidden = false;
 }
 
@@ -1298,7 +1298,7 @@ async function requestPasswordReset() {
   localStorage.setItem(localPasswordResetKey, JSON.stringify(resetRecord));
 
   const resetUrl = buildPasswordResetUrl(email, token);
-  const subject = encodeURIComponent("Reset your J&C PokePawns password");
+  const subject = encodeURIComponent("Reset your CardShop Collectables password");
   const body = encodeURIComponent(`Click this link to reset your password. It expires in 1 hour.\n\n${resetUrl}`);
   window.location.href = `mailto:${encodeURIComponent(email)}?subject=${subject}&body=${body}`;
   setAuthMessage(`Your email app should open with a reset link for ${email}. Send that message to yourself, then check that inbox, spam, or junk folder.`);
@@ -2447,7 +2447,7 @@ document.addEventListener("click", (event) => {
 if (clearSavedCardsButton) {
   clearSavedCardsButton.addEventListener("click", async () => {
     if (hasApiBackend()) {
-      savedCardsTarget.innerHTML = "<p class=\"scanner-status\">Bulk clear is local-only for now. Server cards can be deleted one at a time after we add delete buttons.</p>";
+      savedCardsTarget.innerHTML = "<p class=\"scanner-status\">Bulk clear is local-only for now. Server cards can be deleted one at a time after delete buttons are added.</p>";
       return;
     }
 

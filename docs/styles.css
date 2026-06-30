@@ -1290,7 +1290,7 @@ h2 {
   display: flex;
   gap: 0.5rem;
   justify-content: space-between;
-  margin-right: 7.4rem;
+  margin-right: 8.6rem;
   min-height: 2.2rem;
 }
 
@@ -1300,19 +1300,24 @@ h2 {
   font-size: 0.78rem;
   font-weight: 900;
   line-height: 1.15;
-  max-width: 4.7rem;
-  padding-top: 0.22rem;
   text-align: right;
   white-space: nowrap;
 }
 
 .stock-buy-panel {
-  align-items: center;
+  align-items: flex-end;
   display: flex;
-  gap: 0.4rem;
+  flex-direction: column;
+  gap: 0.25rem;
   position: absolute;
   right: 1rem;
   top: 0.85rem;
+}
+
+.stock-buy-controls {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
 }
 
 .stock-buy-panel label {
@@ -2181,11 +2186,7 @@ footer {
 
   .stock-card-topline {
     margin-right: 0;
-    padding-right: 7.4rem;
-  }
-
-  .stock-count {
-    max-width: 4.7rem;
+    padding-right: 8.6rem;
   }
 
   .scanner-result {

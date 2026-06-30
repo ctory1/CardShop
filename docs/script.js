@@ -116,14 +116,16 @@ function cardTemplate(card, index) {
         <div class="card-body">
           <div class="stock-card-topline">
             <span class="condition">${escapeHtml(card.condition)}</span>
-            <span class="stock-count">${quantity} in stock</span>
           </div>
           <div class="stock-buy-panel">
-            <label for="stockQty${index}">Qty</label>
-            <select id="stockQty${index}" class="stock-quantity" data-stock-quantity="${index}" ${canBuy ? "" : "disabled"}>
-              ${Array.from({ length: Math.max(quantity, 1) }, (_, value) => `<option value="${value + 1}">${value + 1}</option>`).join("")}
-            </select>
-            <button class="btn btn-primary btn-sm buy-card-button" type="button" data-buy-card="${index}" ${canBuy ? "" : "disabled"}>${canBuy ? "Buy" : "Sold"}</button>
+            <span class="stock-count">${quantity} in stock</span>
+            <div class="stock-buy-controls">
+              <label for="stockQty${index}">Qty</label>
+              <select id="stockQty${index}" class="stock-quantity" data-stock-quantity="${index}" ${canBuy ? "" : "disabled"}>
+                ${Array.from({ length: Math.max(quantity, 1) }, (_, value) => `<option value="${value + 1}">${value + 1}</option>`).join("")}
+              </select>
+              <button class="btn btn-primary btn-sm buy-card-button" type="button" data-buy-card="${index}" ${canBuy ? "" : "disabled"}>${canBuy ? "Buy" : "Sold"}</button>
+            </div>
           </div>
           <h3>${card.name}</h3>
           <p>${card.set}</p>
